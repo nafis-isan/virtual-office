@@ -71,6 +71,14 @@ npm run dev
 
 Buka alamat yang ditampilkan Nuxt (umumnya `http://localhost:3000`). API lokal dapat diganti melalui konfigurasi Nuxt `runtimeConfig.public.apiBase`.
 
+Jika port `8000` sudah digunakan backend lain, jalankan backend aplikasi ini di `8001`:
+
+```powershell
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+```
+
+Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt mengarah ke port tersebut. File `.env` lokal diabaikan Git.
+
 ## Yang tersedia pada MVP ini
 
 - Scene kantor 3D stylized dengan empat karakter agent humanoid.

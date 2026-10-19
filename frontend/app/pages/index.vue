@@ -2,8 +2,8 @@
 import type { Activity, Agent, Task, TaskDetail } from '~/types/office'
 
 useHead({
-  title: 'Visual Office AI',
-  meta: [{ name: 'description', content: 'Kantor virtual untuk tim AI multi-agent.' }],
+  title: 'NF Office AI Workspace',
+  meta: [{ name: 'description', content: 'NF Office AI Workspace — ruang kerja tim agent AI.' }],
 })
 
 const api = useOfficeApi()
@@ -31,7 +31,7 @@ function getErrorMessage(error: unknown) {
       return data.detail
     }
   }
-  return 'Tidak dapat menghubungi backend. Pastikan FastAPI berjalan di localhost:8000.'
+  return 'Tidak dapat menghubungi backend. Periksa server FastAPI dan alamat API di frontend/.env.'
 }
 
 async function refreshDashboard() {
@@ -98,26 +98,26 @@ onBeforeUnmount(() => {
 <template>
   <main class="app-shell">
     <header class="topbar">
-      <NuxtLink class="brand" to="/" aria-label="Visual Office AI beranda">
+      <NuxtLink class="brand" to="/" aria-label="NF Office AI Workspace beranda">
         <span class="brand-mark"><i /><i /><i /><i /></span>
-        <span>visual<span class="brand-light">office</span><small>AI WORKSPACE</small></span>
+        <span class="brand-wordmark"><strong>NF</strong><span>Office</span><small>AI WORKSPACE</small></span>
       </NuxtLink>
       <div class="topbar-right">
         <span class="connection-pill" :class="{ 'connection-offline': !isReady }">
           <i />{{ connectionLabel }}
         </span>
-        <span class="date-label">WORKSPACE · LOKAL</span>
-        <div class="user-mark">VA</div>
+        <span class="date-label">RUANG KERJA · LOKAL</span>
+        <div class="user-mark">NF</div>
       </div>
     </header>
 
     <section class="welcome-row">
       <div>
-        <p class="eyebrow">SENIN · AI PROJECT STUDIO</p>
-        <h1>Selamat datang di <span>kantor.</span></h1>
-        <p class="welcome-subtitle">Ruang kolaborasi digital untuk ide yang jadi kenyataan.</p>
+        <p class="eyebrow">NF OFFICE <span class="heading-divider">/</span> WORKSPACE HARI INI</p>
+        <h1>Ruang kerja <span>tim AI.</span></h1>
+        <p class="welcome-subtitle">Satu instruksi. Kolaborasi yang terlihat. Hasil yang bisa ditinjau.</p>
       </div>
-      <div class="welcome-note"><span>✳</span><div><strong>Empat peran.</strong><small>Satu tim yang fokus.</small></div></div>
+      <div class="welcome-note"><span class="welcome-signal" /><div><strong>4 agent terhubung</strong><small>Status mengikuti aktivitas backend</small></div></div>
     </section>
 
     <div v-if="errorMessage" class="connection-error" role="alert">
@@ -128,8 +128,8 @@ onBeforeUnmount(() => {
     <section class="dashboard-grid">
       <div class="scene-column">
         <div class="section-heading">
-          <div><p class="eyebrow">THE VIRTUAL FLOOR</p><h2>Office floor</h2></div>
-          <span class="scene-caption"><i /> AGENT AKTIF → AREA KOLABORASI</span>
+          <div><p class="eyebrow">PETA RUANG KERJA <span class="heading-divider">/</span> 01</p><h2>Office floor</h2></div>
+          <span class="scene-caption"><i /> AGENT AKTIF MENUJU MEJA TIM</span>
         </div>
         <OfficeScene :agents="agents" />
         <AgentsAgentStatusPanel :agents="agents" :loading="loading" />
@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
     <footer class="app-footer">
-      <span>VISUAL OFFICE AI <i>·</i> LOKAL</span>
+      <span>NF OFFICE <i>·</i> AI WORKSPACE</span>
       <span v-if="health && !health.gemini_configured" class="footer-warning">
         Gemini belum dikonfigurasi — tambahkan GEMINI_API_KEY dan GEMINI_MODEL di backend/.env.
       </span>
