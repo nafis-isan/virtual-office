@@ -82,8 +82,8 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 
 ## Yang tersedia pada MVP ini
 
-- Scene kantor 3D stylized dengan empat karakter agent humanoid.
-- Tata kantor stylized dengan meja pribadi dan meja kolaborasi di tengah; agent berstatus aktif berjalan ke area kolaborasi dan kembali ke mejanya ketika tugas selesai.
+- Scene kantor 2D pixel-art dengan empat karakter agent interaktif, workstation berlabel, ruang kolaborasi, dan rak arsip RAG.
+- Denah menyorot agent serta langkah dari task terpilih, menampilkan pembaruan aktivitas di samping karakter, dan menggerakkan agent aktif ke area kolaborasi berdasarkan status backend.
 - Panel status agent, daftar riwayat task, aktivitas, langkah, dan hasil.
 - Chat membuat task melalui REST API; dashboard melakukan polling status dari backend.
 - Project Manager menyusun rencana JSON tervalidasi, lalu specialist bekerja berurutan dan Project Manager merangkum hasil.

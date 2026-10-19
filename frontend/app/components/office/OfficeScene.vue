@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { Agent, AgentStatus } from '~/types/office'
+import type { Activity, Agent, AgentStatus, TaskDetail } from '~/types/office'
 
-const props = defineProps<{ agents: Agent[] }>()
+const props = defineProps<{ agents: Agent[]; task: TaskDetail | null; activities: Activity[] }>()
 
 const selectedIndex = ref(0)
 const stations = [
@@ -22,19 +22,53 @@ const statusLabels: Record<AgentStatus, string> = {
   offline: 'Tidak terhubung',
 }
 
+const taskIsActive = computed(() => ['thinking', 'working'].includes(props.task?.status ?? ''))
+const activeStep = computed(() => props.task?.steps.find((step) => step.status === 'working'))
+const activeActivity = computed(() =>
+  [...props.activities].reverse().find((activity) => ['thinking', 'working'].includes(activity.status)),
+)
+const latestActivity = computed(() => props.activities.at(-1))
+const spotlightAgentName = computed(() => {
+  if (taskIsActive.value) {
+    return activeStep.value?.agent_name ?? activeActivity.value?.agent_name ?? 'project_manager'
+  }
+  return latestActivity.value?.agent_name
+})
+const spotlightMessage = computed(() => {
+  if (taskIsActive.value) {
+    return activeStep.value?.title ?? activeActivity.value?.message ?? 'Menyusun rencana kerja.'
+  }
+  return latestActivity.value?.message
+})
+
 const characters = computed(() =>
   stations.map((station, index) => {
     const agent = props.agents[index]
-    const active =
-      agent?.status === 'thinking' ||
-      agent?.status === 'working' ||
-      agent?.status === 'waiting' ||
-      agent?.status === 'waiting_approval'
+    const focused = !!agent && agent.name === spotlightAgentName.value
+    const active = taskIsActive.value
+      ? focused
+      : !props.task &&
+        (agent?.status === 'thinking' ||
+          agent?.status === 'working' ||
+          agent?.status === 'waiting' ||
+          agent?.status === 'waiting_approval')
+    const status: AgentStatus | undefined =
+      taskIsActive.value && focused
+        ? activeStep.value
+          ? 'working'
+          : activeActivity.value?.status === 'working'
+            ? 'working'
+            : 'thinking'
+        : agent?.status
     const position = active ? station.meeting : station.home
 
     return {
       agent,
       active,
+      focused,
+      status,
+      callout: focused ? spotlightMessage.value : undefined,
+      taskTitle: props.task?.steps.find((step) => step.agent_name === agent?.name)?.title,
       color: station.color,
       x: position[0],
       y: position[1],
@@ -43,6 +77,11 @@ const characters = computed(() =>
 )
 
 const selectedCharacter = computed(() => characters.value[selectedIndex.value])
+
+function compactMessage(message: string | undefined) {
+  if (!message) return ''
+  return message.length > 42 ? `${message.slice(0, 39).trimEnd()}...` : message
+}
 
 function statusColor(status: AgentStatus | undefined) {
   if (status === 'working' || status === 'thinking') return '#b9f064'
@@ -95,6 +134,9 @@ function selectAgent(index: number) {
         <text x="500" y="83" text-anchor="middle" fill="#c3ef6a" font-size="11" font-family="monospace" font-weight="700" letter-spacing="2">
           NF OFFICE
         </text>
+        <text x="500" y="121" text-anchor="middle" fill="#c9d0ba" font-size="8" font-family="monospace" letter-spacing="1.5">
+          {{ taskIsActive ? `TASK #${task?.id} · ${task?.status === 'thinking' ? 'PLANNING' : 'TEAM AT WORK'}` : 'PRIVATE WORKSTATIONS' }}
+        </text>
 
         <g v-for="(station, index) in stations" :key="`route-${index}`" class="agent-route" :class="{ 'agent-route-active': characters[index]?.active }">
           <path
@@ -124,6 +166,10 @@ function selectAgent(index: number) {
           <rect :x="station.x + 130" :y="station.y + 33" width="47" height="6" fill="#af7047" />
           <rect :x="station.x + 141" :y="station.y + 54" width="28" height="24" fill="#4f7452" />
           <rect :x="station.x + 147" :y="station.y + 46" width="15" height="14" fill="#78a75d" />
+          <rect :x="station.x + 124" :y="station.y + 82" width="68" height="14" fill="#835839" />
+          <text :x="station.x + 158" :y="station.y + 92" text-anchor="middle" fill="#f4e5c5" font-size="6" font-family="monospace" letter-spacing=".3">
+            {{ ['PM STUDIO', 'RESEARCH', 'DESIGN', 'DEV BAY'][index] }}
+          </text>
           <path :d="`M${station.x + 14} ${station.y + 103}V${station.y + 133}M${station.x + 186} ${station.y + 103}V${station.y + 133}`" stroke="#704633" stroke-width="8" />
           <path :d="`M${station.x + 12} ${station.y + 101}H${station.x + 188}`" stroke="#895638" stroke-width="7" />
         </g>
@@ -143,6 +189,38 @@ function selectAgent(index: number) {
           <rect :x="seat[0] - 18" :y="seat[1] - 8" width="36" height="16" fill="#26383b" />
           <rect :x="seat[0] - 12" :y="seat[1] - 4" width="24" height="4" fill="#b9f064" />
         </g>
+        <rect x="423" y="424" width="154" height="14" fill="#26383b" />
+        <text x="500" y="434" text-anchor="middle" fill="#f1d39b" font-size="7" font-family="monospace" letter-spacing="1.1">
+          TEAM COLLABORATION
+        </text>
+
+        <g class="archive-corner" aria-label="Pustaka dokumen RAG">
+          <rect x="58" y="274" width="116" height="78" fill="#76513d" />
+          <rect x="64" y="266" width="104" height="78" fill="#d7a365" />
+          <rect x="70" y="272" width="92" height="10" fill="#344344" />
+          <text x="116" y="280" text-anchor="middle" fill="#f5e7c8" font-size="6" font-family="monospace" letter-spacing=".5">
+            RAG ARCHIVE
+          </text>
+          <rect x="72" y="288" width="88" height="48" fill="#684c39" />
+          <path d="M72 305H160M72 321H160" stroke="#d0a574" stroke-width="3" />
+          <rect x="78" y="291" width="9" height="12" fill="#b66b4d" />
+          <rect x="89" y="290" width="11" height="13" fill="#d4c390" />
+          <rect x="102" y="292" width="9" height="11" fill="#6d8b6b" />
+          <rect x="114" y="289" width="12" height="14" fill="#7d8e9a" />
+          <rect x="130" y="291" width="10" height="12" fill="#c78d54" />
+          <rect x="144" y="290" width="10" height="13" fill="#a68b61" />
+          <rect x="78" y="307" width="12" height="12" fill="#79916a" />
+          <rect x="94" y="307" width="9" height="12" fill="#bd7950" />
+          <rect x="106" y="307" width="13" height="12" fill="#d4c390" />
+          <rect x="123" y="307" width="10" height="12" fill="#798b9a" />
+          <rect x="139" y="307" width="15" height="12" fill="#b66b4d" />
+          <rect x="78" y="323" width="11" height="10" fill="#c78d54" />
+          <rect x="95" y="323" width="12" height="10" fill="#738c71" />
+          <rect x="113" y="323" width="10" height="10" fill="#b66b4d" />
+          <rect x="130" y="323" width="10" height="10" fill="#d4c390" />
+          <rect x="146" y="323" width="8" height="10" fill="#7d8e9a" />
+          <path d="M72 344V357M156 344V357M68 357H160" stroke="#594332" stroke-width="5" />
+        </g>
 
         <g v-for="(plant, index) in [[72, 151], [928, 151], [72, 500], [928, 500]]" :key="`plant-${index}`">
           <rect :x="plant[0] - 16" :y="plant[1] + 5" width="32" height="24" fill="#cc8750" />
@@ -160,6 +238,8 @@ function selectAgent(index: number) {
           :class="{
             'office-agent-selected': selectedIndex === index,
             'office-agent-active': character.active,
+            'office-agent-focused': character.focused,
+            [`office-agent-status-${character.status ?? 'offline'}`]: true,
           }"
           :transform="`translate(${character.x} ${character.y})`"
           role="button"
@@ -170,6 +250,7 @@ function selectAgent(index: number) {
           @keydown.enter.prevent="selectAgent(index)"
           @keydown.space.prevent="selectAgent(index)"
         >
+          <g class="agent-sprite">
           <rect class="agent-selection-ring" x="-34" y="-37" width="68" height="77" />
           <rect x="-16" y="31" width="32" height="5" fill="#263638" opacity=".28" />
           <rect x="-13" y="20" width="9" height="13" fill="#34474a" />
@@ -188,7 +269,7 @@ function selectAgent(index: number) {
           <rect x="6" y="-15" width="4" height="4" fill="#263638" />
           <rect x="-3" y="-5" width="6" height="3" fill="#aa6652" />
           <rect x="-12" y="6" width="24" height="3" fill="#ffffff" opacity=".32" />
-          <rect x="22" y="-28" width="10" height="10" :fill="statusColor(character.agent?.status)" stroke="#f3efe6" stroke-width="2" />
+          <rect class="agent-status-marker" x="22" y="-28" width="10" height="10" :fill="statusColor(character.status)" stroke="#f3efe6" stroke-width="2" />
           <g v-if="index === 0">
             <rect x="-15" y="-20" width="4" height="10" fill="#d2b783" />
             <rect x="-19" y="-18" width="4" height="6" fill="#d2b783" />
@@ -213,6 +294,19 @@ function selectAgent(index: number) {
               {{ character.agent?.display_name ?? shortName(character.agent?.name, index) }}
             </text>
           </g>
+          </g>
+          <g v-if="character.focused && character.callout" class="agent-callout" :class="{ 'agent-callout-active': taskIsActive }">
+            <path d="M-3 -40L4 -40L0 -34Z" fill="#263638" />
+            <rect x="-82" y="-78" width="164" height="38" fill="#263638" />
+            <rect x="-78" y="-74" width="156" height="30" fill="#fbf3df" />
+            <rect x="-78" y="-74" width="4" height="30" :fill="character.color" />
+            <text x="0" y="-61" text-anchor="middle" fill="#355748" font-size="6" font-family="monospace" font-weight="700" letter-spacing=".8">
+              {{ taskIsActive ? 'CURRENT ACTION' : 'LATEST UPDATE' }}
+            </text>
+            <text x="0" y="-50" text-anchor="middle" fill="#3d4038" font-size="7" font-family="monospace">
+              {{ compactMessage(character.callout) }}
+            </text>
+          </g>
         </g>
 
         <rect x="40" y="568" width="920" height="12" fill="#394847" />
@@ -225,6 +319,7 @@ function selectAgent(index: number) {
         <span><i class="legend-active" /> Aktif</span>
         <span><i class="legend-idle" /> Siap</span>
         <span><i class="legend-table" /> Kolaborasi</span>
+        <span><i class="legend-archive" /> RAG</span>
       </div>
     </div>
     <div v-if="selectedCharacter" class="scene-inspector" aria-live="polite">
@@ -234,12 +329,13 @@ function selectAgent(index: number) {
       <span class="inspector-copy">
         <strong>{{ selectedCharacter.agent?.display_name ?? shortName(selectedCharacter.agent?.name, selectedIndex) }}</strong>
         <small>{{ selectedCharacter.agent?.role ?? 'Menunggu status agent dari backend' }}</small>
+        <small v-if="selectedCharacter.taskTitle" class="inspector-task">{{ selectedCharacter.taskTitle }}</small>
       </span>
       <span class="inspector-status">
         <i :style="{ '--status-color': statusColor(selectedCharacter.agent?.status) }" />
         {{ statusLabels[selectedCharacter.agent?.status ?? 'offline'] }}
       </span>
-      <span class="inspector-hint">Klik karakter untuk melihat</span>
+      <span class="inspector-hint">{{ selectedCharacter.focused ? 'Fokus aktivitas' : 'Klik karakter untuk melihat' }}</span>
     </div>
   </div>
 </template>

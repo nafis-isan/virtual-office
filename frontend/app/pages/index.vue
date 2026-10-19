@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
           <div><p class="eyebrow">PETA RUANG KERJA <span class="heading-divider">/</span> 01</p><h2>Office floor</h2></div>
           <span class="scene-caption"><i /> AGENT AKTIF MENUJU MEJA TIM</span>
         </div>
-        <OfficeScene :agents="agents" />
+        <OfficeScene :agents="agents" :task="selectedTask" :activities="activities" />
         <AgentsAgentStatusPanel :agents="agents" :loading="loading" />
       </div>
       <div class="workspace-column">
