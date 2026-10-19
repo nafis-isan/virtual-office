@@ -136,6 +136,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="workspace-column">
         <ChatPanel :sending="sending" :disabled="!isReady" @submit="submitInstruction" />
+        <KnowledgeLibrary />
         <TasksTaskConsole
           :tasks="tasks"
           :selected-id="selectedId"

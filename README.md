@@ -1,6 +1,6 @@
 # Visual Office AI
 
-Dashboard kantor virtual multi-agent lokal: Nuxt 4 + Vue 3 + TresJS untuk UI dan scene 3D, FastAPI untuk API/orchestrator, MySQL untuk penyimpanan, serta Gemini melalui backend.
+Dashboard kantor virtual multi-agent lokal: Nuxt 4 + Vue 3 untuk UI kantor 2D bergaya pixel-art, FastAPI untuk API/orchestrator, MySQL untuk penyimpanan dan indeks RAG, serta Gemini untuk generasi dan embedding.
 
 ## Prasyarat
 
@@ -18,9 +18,9 @@ Dashboard kantor virtual multi-agent lokal: Nuxt 4 + Vue 3 + TresJS untuk UI dan
 | SQLAlchemy / PyMySQL / Alembic | 2.0.23 / 1.2.3 / 1.20.0 |
 | Pydantic Settings / python-dotenv | 2.1.0 / 1.0.0 |
 | Google GenAI SDK / httpx / pytest | 1.2.0 / 0.28.1 / 8.4.2 |
+| python-multipart / pypdf / python-docx | 0.0.20 / 5.1.0 / 1.1.2 |
 | Node.js / npm | 24.20.0 / 11.19.0 |
 | Nuxt / Vue | 4.6.2 / 3.5.44 |
-| TresJS Nuxt / Three.js | 5.7.3 / 0.180.0 |
 | TypeScript / Vue TypeScript Checker | 5.9.3 / 3.3.13 |
 
 Backend Python dipatok pada versi yang diuji di `backend/requirements.txt`; versi frontend dikunci di `frontend/package-lock.json`.
@@ -50,6 +50,7 @@ Copy-Item .env.example .env
 ```
 
 Isi `DATABASE_URL` pada `backend/.env`. Isi `GEMINI_API_KEY` dan `GEMINI_MODEL` dengan kredensial/model yang sudah diverifikasi di Google AI Studio. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
+RAG memakai `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` secara default; model embedding juga memerlukan akses Gemini API.
 
 Jalankan migrasi dan server:
 
@@ -86,6 +87,9 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 - Panel status agent, daftar riwayat task, aktivitas, langkah, dan hasil.
 - Chat membuat task melalui REST API; dashboard melakukan polling status dari backend.
 - Project Manager menyusun rencana JSON tervalidasi, lalu specialist bekerja berurutan dan Project Manager merangkum hasil.
+- Pustaka RAG menerima dokumen PDF, TXT, MD, dan DOCX sampai 5 MB; teks dipecah menjadi potongan dan embedding Gemini disimpan di MySQL. Saat task dibuat, lima potongan terdekat (jika relevan) dipakai sebagai konteks dan sumber dicantumkan di ringkasan.
+- Dokumen diunggah melalui UI dan dapat dihapus dari pustaka; jalankan `alembic upgrade head` untuk membuat tabel knowledge.
+- Isi teks dikirim ke Gemini API untuk embedding dan sebagai konteks jawaban; file asli tidak disimpan. Jangan unggah data sensitif yang tidak boleh diproses oleh layanan Gemini.
 - Task, langkah, aktivitas, pesan, artefak teks, agent, dan approval disimpan melalui model SQLAlchemy dan migrasi Alembic MySQL.
 - Gemini hanya dipanggil backend. Status API key tidak membuka nilainya ke frontend.
 - Penanganan error Gemini/database ditampilkan sebagai pesan aman; task gagal tidak ditandai selesai.
@@ -94,7 +98,7 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 
 Programmer hanya menghasilkan draft dan artefak teks. MVP ini **tidak** menulis, menimpa, atau menghapus file, menjalankan shell, menginstal paket, melakukan pencarian web, maupun membatalkan task. Approval dicatat sebagai konsep API, tetapi tidak memberi izin untuk menjalankan tindakan sistem. Jangan mengaktifkan tindakan tersebut tanpa sandbox, validasi workspace, dan kebijakan approval yang ditinjau.
 
-Agent memerlukan MySQL dan konfigurasi `GEMINI_API_KEY` serta `GEMINI_MODEL` agar tugas dapat diproses. Nama model dan ketersediaan kuota bergantung pada konfigurasi akun; aplikasi tidak mengasumsikan nama model atau kuota gratis tanpa batas.
+Agent memerlukan MySQL dan konfigurasi `GEMINI_API_KEY` serta `GEMINI_MODEL` agar tugas dapat diproses. Unggah dan retrieval dokumen juga memerlukan akses ke model `GEMINI_EMBEDDING_MODEL`. Nama model dan ketersediaan kuota bergantung pada konfigurasi akun; aplikasi tidak mengasumsikan nama model atau kuota gratis tanpa batas.
 
 ## Pemeriksaan
 

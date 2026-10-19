@@ -104,3 +104,31 @@ class Approval(Base):
     decision_note: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    chunks: Mapped[list["KnowledgeChunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    page_number: Mapped[int | None] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[str] = mapped_column(Text, nullable=False)
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")

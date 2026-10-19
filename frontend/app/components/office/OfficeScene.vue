@@ -1,395 +1,245 @@
 <script setup lang="ts">
 import type { Agent, AgentStatus } from '~/types/office'
 
-type Position = [number, number, number]
-
 const props = defineProps<{ agents: Agent[] }>()
 
-const desks = [
-  { x: -4.05, z: -2.72, color: '#49b98a' },
-  { x: 4.05, z: -2.72, color: '#ba83e8' },
-  { x: -4.05, z: 2.76, color: '#f3a35d' },
-  { x: 4.05, z: 2.76, color: '#62b6df' },
-]
-const homes: Position[] = [
-  [-4.05, 0, -1.58],
-  [4.05, 0, -1.58],
-  [-4.05, 0, 1.55],
-  [4.05, 0, 1.55],
-]
-const meetingPoints: Position[] = [
-  [-1.26, 0, -0.84],
-  [1.26, 0, -0.84],
-  [-1.26, 0, 0.84],
-  [1.26, 0, 0.84],
-]
-const floorboards = Array.from({ length: 24 }, (_, index) => ({
-  z: -4.14 + index * 0.36,
-  color: index % 2 === 0 ? '#b96e43' : '#c57a4a',
-}))
-const windows = [-3.75, -1.25, 1.25, 3.75]
-const plants = [
-  { x: -5.55, z: -3.15 },
-  { x: 5.55, z: -3.15 },
-  { x: -5.55, z: 3.2 },
-  { x: 5.55, z: 3.2 },
+const selectedIndex = ref(0)
+const stations = [
+  { x: 132, y: 126, home: [227, 260], meeting: [414, 283], color: '#54765d' },
+  { x: 668, y: 126, home: [773, 260], meeting: [586, 283], color: '#657d8a' },
+  { x: 132, y: 406, home: [227, 536], meeting: [414, 357], color: '#b66b4d' },
+  { x: 668, y: 406, home: [773, 536], meeting: [586, 357], color: '#8c7953' },
 ]
 
-const actorPositions = ref<Position[]>(homes.map((position) => [...position] as Position))
-const actorRotations = ref<number[]>(homes.map(([x, , z]) => Math.atan2(-x, -z)))
-const gaitCycles = ref<number[]>([0, 0, 0, 0])
+const statusLabels: Record<AgentStatus, string> = {
+  idle: 'Siap di meja',
+  thinking: 'Menyusun rencana',
+  working: 'Sedang bekerja',
+  waiting: 'Menunggu proses',
+  waiting_approval: 'Menunggu persetujuan',
+  completed: 'Selesai',
+  failed: 'Perlu perhatian',
+  offline: 'Tidak terhubung',
+}
 
 const characters = computed(() =>
-  desks.map((desk, index) => ({
-    ...desk,
-    agent: props.agents[index],
-    position: actorPositions.value[index] ?? homes[index],
-    rotation: actorRotations.value[index] ?? 0,
-    gait: gaitCycles.value[index] ?? 0,
-  })),
+  stations.map((station, index) => {
+    const agent = props.agents[index]
+    const active =
+      agent?.status === 'thinking' ||
+      agent?.status === 'working' ||
+      agent?.status === 'waiting' ||
+      agent?.status === 'waiting_approval'
+    const position = active ? station.meeting : station.home
+
+    return {
+      agent,
+      active,
+      color: station.color,
+      x: position[0],
+      y: position[1],
+    }
+  }),
 )
+
+const selectedCharacter = computed(() => characters.value[selectedIndex.value])
 
 function statusColor(status: AgentStatus | undefined) {
   if (status === 'working' || status === 'thinking') return '#b9f064'
-  if (status === 'waiting' || status === 'waiting_approval') return '#ffc463'
-  if (status === 'failed') return '#f47171'
-  if (status === 'completed') return '#91a29b'
+  if (status === 'waiting' || status === 'waiting_approval') return '#e5bd72'
+  if (status === 'failed') return '#d86f5a'
+  if (status === 'completed') return '#91a29a'
   return '#52666d'
 }
 
-function animateAgents({ delta, elapsed }: { delta: number; elapsed: number }) {
-  const nextPositions = actorPositions.value.map((position) => [...position] as Position)
-  const nextRotations = [...actorRotations.value]
-  const nextGaits = [...gaitCycles.value]
+function shortName(name: string | undefined, index: number) {
+  return name?.replace(/_/g, ' ') ?? `Agent ${index + 1}`
+}
 
-  characters.value.forEach((character, index) => {
-    const status = character.agent?.status
-    const active =
-      status === 'thinking' ||
-      status === 'working' ||
-      status === 'waiting' ||
-      status === 'waiting_approval'
-    const target = active ? meetingPoints[index] : homes[index]
-    const current = actorPositions.value[index]
-    const currentRotation = actorRotations.value[index]
-    if (!target || !current || currentRotation === undefined) return
-
-    const dx = target[0] - current[0]
-    const dz = target[2] - current[2]
-    const moving = Math.hypot(dx, dz) > 0.035
-    const easing = Math.min(1, delta * 1.8)
-
-    nextPositions[index] = [
-      current[0] + dx * easing,
-      moving ? Math.abs(Math.sin(elapsed * 9 + index)) * 0.075 : 0,
-      current[2] + dz * easing,
-    ]
-    nextGaits[index] = moving ? Math.sin(elapsed * 9 + index) * 0.48 : 0
-
-    const direction = moving ? Math.atan2(dx, dz) : Math.atan2(-current[0], -current[2])
-    const rotationDelta = Math.atan2(
-      Math.sin(direction - currentRotation),
-      Math.cos(direction - currentRotation),
-    )
-    nextRotations[index] = currentRotation + rotationDelta * easing
-  })
-
-  actorPositions.value = nextPositions
-  actorRotations.value = nextRotations
-  gaitCycles.value = nextGaits
+function selectAgent(index: number) {
+  selectedIndex.value = index
 }
 </script>
 
 <template>
-  <div class="scene-frame">
-    <div class="scene-legend" aria-hidden="true">
-      <span><i class="legend-active" /> Agent aktif</span>
-      <span><i class="legend-meeting" /> Meja kolaborasi</span>
-    </div>
-    <ClientOnly>
-      <TresCanvas
-        clear-color="#202d30"
-        :shadows="true"
-        :dpr="[0.8, 1]"
-        :antialias="false"
-        @loop="animateAgents"
+  <div class="office-experience">
+    <div class="scene-frame">
+      <svg
+        class="office-map"
+        viewBox="0 0 1000 620"
+        role="group"
+        aria-label="Denah interaktif kantor NF Office AI"
+        preserveAspectRatio="xMidYMid meet"
       >
-        <TresPerspectiveCamera
-          :position="[0, 14.5, 16.2]"
-          :rotation="[-0.72, 0, 0]"
-          :fov="40"
-          :near="0.1"
-          :far="100"
-        />
-        <TresAmbientLight :intensity="1.65" />
-        <TresDirectionalLight :position="[-5, 12, 7]" :intensity="2.55" cast-shadow />
-        <TresDirectionalLight :position="[6, 8, -3]" :intensity="0.65" color="#ffc783" />
+        <defs>
+          <pattern id="wood-floor" width="120" height="32" patternUnits="userSpaceOnUse">
+            <rect width="120" height="32" fill="#b96e43" />
+            <rect width="120" height="15" fill="#c57a4a" />
+            <path d="M0 16H120M0 31H120M42 0V15M94 16V31" stroke="#a9623d" stroke-width="2" opacity=".7" />
+            <path d="M5 5H31M51 21H80M101 5H116" stroke="#db9860" stroke-width="2" opacity=".7" />
+          </pattern>
+        </defs>
 
-        <TresMesh :position="[0, -0.35, 0]" receive-shadow>
-          <TresBoxGeometry :args="[12.8, 0.58, 9]" />
-          <TresMeshStandardMaterial color="#7d4937" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, -0.035, 0]" receive-shadow>
-          <TresBoxGeometry :args="[12.45, 0.09, 8.65]" />
-          <TresMeshStandardMaterial color="#bb7547" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh v-for="(plank, index) in floorboards" :key="`plank-${index}`" :position="[0, 0.014, plank.z]" receive-shadow>
-          <TresBoxGeometry :args="[12.38, 0.025, 0.325]" />
-          <TresMeshStandardMaterial :color="plank.color" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 0.037, 0]" receive-shadow>
-          <TresBoxGeometry :args="[4.5, 0.018, 3.4]" />
-          <TresMeshStandardMaterial color="#d5a067" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 0.05, 0]" receive-shadow>
-          <TresBoxGeometry :args="[4.14, 0.014, 3.04]" />
-          <TresMeshStandardMaterial color="#44675b" roughness="1" flat-shading />
-        </TresMesh>
+        <rect width="1000" height="620" fill="#202d30" />
+        <rect x="34" y="34" width="932" height="552" fill="#7d4937" />
+        <rect x="45" y="45" width="910" height="530" fill="url(#wood-floor)" />
 
-        <TresMesh :position="[0, 1.2, -4.33]" cast-shadow receive-shadow>
-          <TresBoxGeometry :args="[12.75, 2.75, 0.28]" />
-          <TresMeshStandardMaterial color="#39484a" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 2.54, -4.16]" cast-shadow>
-          <TresBoxGeometry :args="[12.78, 0.16, 0.54]" />
-          <TresMeshStandardMaterial color="#d09357" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh v-for="(x, index) in windows" :key="`window-${index}`" :position="[x, 1.58, -4.165]">
-          <TresBoxGeometry :args="[2.05, 1.23, 0.045]" />
-          <TresMeshBasicMaterial color="#91bec0" />
-        </TresMesh>
-        <TresMesh v-for="x in [-2.5, 0, 2.5]" :key="`window-mullion-${x}`" :position="[x, 1.58, -4.115]">
-          <TresBoxGeometry :args="[0.1, 1.32, 0.08]" />
-          <TresMeshStandardMaterial color="#e6b878" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 1.58, -4.11]">
-          <TresBoxGeometry :args="[10.4, 0.09, 0.08]" />
-          <TresMeshStandardMaterial color="#e6b878" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 1.04, -4.075]">
-          <TresBoxGeometry :args="[12.2, 0.12, 0.25]" />
-          <TresMeshStandardMaterial color="#c07b49" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 2.32, -4.08]">
-          <TresBoxGeometry :args="[1.9, 0.38, 0.05]" />
-          <TresMeshStandardMaterial color="#263637" roughness="1" flat-shading />
-        </TresMesh>
-        <TresMesh :position="[0, 2.34, -4.045]">
-          <TresBoxGeometry :args="[1.66, 0.16, 0.025]" />
-          <TresMeshBasicMaterial color="#c3ef6a" />
-        </TresMesh>
+        <path d="M45 45H955V104H45Z" fill="#39484a" />
+        <path d="M45 99H955V110H45Z" fill="#d09357" />
+        <g v-for="x in [125, 275, 425, 575, 725, 875]" :key="`window-${x}`">
+          <rect :x="x - 54" y="56" width="108" height="34" fill="#91bec0" />
+          <path :d="`M${x} 56V90M${x - 54} 73H${x + 54}`" stroke="#e6b878" stroke-width="4" />
+        </g>
+        <rect x="431" y="53" width="138" height="8" fill="#263637" />
+        <rect x="444" y="69" width="112" height="19" fill="#263637" />
+        <text x="500" y="83" text-anchor="middle" fill="#c3ef6a" font-size="11" font-family="monospace" font-weight="700" letter-spacing="2">
+          NF OFFICE
+        </text>
 
-        <TresGroup v-for="(desk, index) in desks" :key="`desk-${index}`" :position="[desk.x, 0, desk.z]">
-          <TresMesh :position="[0, -0.14, 0]" receive-shadow>
-            <TresBoxGeometry :args="[2.8, 0.12, 1.95]" />
-            <TresMeshStandardMaterial color="#202d30" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.68, 0]" cast-shadow receive-shadow>
-            <TresBoxGeometry :args="[2.2, 0.17, 1.22]" />
-            <TresMeshStandardMaterial color="#d99456" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh v-for="x in [-0.9, 0.9]" :key="`desk-leg-${x}`" :position="[x, 0.31, 0]">
-            <TresBoxGeometry :args="[0.11, 0.62, 0.12]" />
-            <TresMeshStandardMaterial color="#704633" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.95, -0.42]" cast-shadow>
-            <TresBoxGeometry :args="[1.02, 0.51, 0.1]" />
-            <TresMeshStandardMaterial color="#18282d" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.96, -0.36]">
-            <TresBoxGeometry :args="[0.83, 0.34, 0.024]" />
-            <TresMeshBasicMaterial :color="desk.color" />
-          </TresMesh>
-          <TresMesh :position="[0, 0.76, -0.24]">
-            <TresBoxGeometry :args="[0.2, 0.08, 0.18]" />
-            <TresMeshStandardMaterial color="#d9bd86" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.79, 0.3]">
-            <TresBoxGeometry :args="[0.73, 0.035, 0.29]" />
-            <TresMeshStandardMaterial color="#35454a" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0.76, 0.81, 0.27]">
-            <TresCylinderGeometry :args="[0.075, 0.085, 0.16, 6]" />
-            <TresMeshStandardMaterial color="#eee2bf" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0.76, 0.93, 0.27]">
-            <TresBoxGeometry :args="[0.075, 0.12, 0.07]" />
-            <TresMeshStandardMaterial color="#629764" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[-0.75, 0.82, 0.27]">
-            <TresBoxGeometry :args="[0.14, 0.08, 0.12]" />
-            <TresMeshStandardMaterial color="#e6bd7b" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.31, 0.72]">
-            <TresCylinderGeometry :args="[0.24, 0.28, 0.48, 6]" />
-            <TresMeshStandardMaterial color="#41545a" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.56, 0.72]" cast-shadow>
-            <TresBoxGeometry :args="[0.43, 0.09, 0.13]" />
-            <TresMeshStandardMaterial color="#d5a067" roughness="1" flat-shading />
-          </TresMesh>
-        </TresGroup>
+        <g v-for="(station, index) in stations" :key="`route-${index}`" class="agent-route" :class="{ 'agent-route-active': characters[index]?.active }">
+          <path
+            :d="`M${station.home[0]} ${station.home[1]} Q500 310 ${station.meeting[0]} ${station.meeting[1]}`"
+            fill="none"
+            stroke="#f0d29b"
+            stroke-width="3"
+            stroke-dasharray="4 10"
+          />
+        </g>
 
-        <TresGroup>
-          <TresMesh :position="[0, 0.47, 0]" cast-shadow receive-shadow>
-            <TresCylinderGeometry :args="[0.82, 0.9, 0.18, 8]" />
-            <TresMeshStandardMaterial color="#e0a45e" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.2, 0]" cast-shadow>
-            <TresBoxGeometry :args="[0.28, 0.46, 0.28]" />
-            <TresMeshStandardMaterial color="#7a4c38" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[-0.31, 0.6, -0.11]" cast-shadow>
-            <TresBoxGeometry :args="[0.42, 0.05, 0.28]" />
-            <TresMeshStandardMaterial color="#26383b" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[-0.31, 0.64, -0.1]">
-            <TresBoxGeometry :args="[0.32, 0.018, 0.19]" />
-            <TresMeshBasicMaterial color="#b9f064" />
-          </TresMesh>
-          <TresMesh :position="[0.34, 0.6, 0.12]" cast-shadow>
-            <TresBoxGeometry :args="[0.42, 0.05, 0.28]" />
-            <TresMeshStandardMaterial color="#26383b" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0.34, 0.64, 0.13]">
-            <TresBoxGeometry :args="[0.32, 0.018, 0.19]" />
-            <TresMeshBasicMaterial color="#b9f064" />
-          </TresMesh>
-          <TresMesh :position="[0, 0.73, -0.04]">
-            <TresBoxGeometry :args="[0.1, 0.07, 0.12]" />
-            <TresMeshStandardMaterial color="#fff0cf" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.79, 0]">
-            <TresBoxGeometry :args="[0.045, 0.025, 0.05]" />
-            <TresMeshBasicMaterial color="#ef6e58" />
-          </TresMesh>
-        </TresGroup>
+        <g v-for="(station, index) in stations" :key="`desk-${index}`">
+          <rect :x="station.x - 8" :y="station.y - 8" width="216" height="142" fill="#76513d" opacity=".5" />
+          <rect :x="station.x" :y="station.y" width="200" height="104" fill="#d99456" />
+          <rect :x="station.x + 8" :y="station.y + 8" width="184" height="88" fill="#e2ae73" />
+          <rect :x="station.x + 16" :y="station.y + 16" width="98" height="60" fill="#263638" />
+          <rect :x="station.x + 22" :y="station.y + 22" width="86" height="47" :fill="station.color" />
+          <path
+            :d="`M${station.x + 31} ${station.y + 33}H${station.x + 96}M${station.x + 31} ${station.y + 42}H${station.x + 82}M${station.x + 31} ${station.y + 51}H${station.x + 96}`"
+            stroke="#f3e5bd"
+            stroke-width="3"
+            opacity=".8"
+          />
+          <rect :x="station.x + 55" :y="station.y + 76" width="18" height="8" fill="#76513d" />
+          <rect :x="station.x + 44" :y="station.y + 84" width="40" height="5" fill="#76513d" />
+          <rect :x="station.x + 130" :y="station.y + 19" width="34" height="7" fill="#f0d29c" />
+          <rect :x="station.x + 130" :y="station.y + 33" width="47" height="6" fill="#af7047" />
+          <rect :x="station.x + 141" :y="station.y + 54" width="28" height="24" fill="#4f7452" />
+          <rect :x="station.x + 147" :y="station.y + 46" width="15" height="14" fill="#78a75d" />
+          <path :d="`M${station.x + 14} ${station.y + 103}V${station.y + 133}M${station.x + 186} ${station.y + 103}V${station.y + 133}`" stroke="#704633" stroke-width="8" />
+          <path :d="`M${station.x + 12} ${station.y + 101}H${station.x + 188}`" stroke="#895638" stroke-width="7" />
+        </g>
 
-        <TresGroup
+        <rect x="310" y="224" width="380" height="222" fill="#d5a067" />
+        <rect x="322" y="236" width="356" height="198" fill="#44675b" />
+        <rect x="340" y="254" width="320" height="162" fill="#c98650" />
+        <ellipse cx="500" cy="342" rx="112" ry="59" fill="#78513c" opacity=".55" />
+        <ellipse cx="500" cy="330" rx="112" ry="59" fill="#e0a45e" />
+        <ellipse cx="500" cy="323" rx="98" ry="46" fill="#e8b77b" />
+        <rect x="486" y="311" width="28" height="26" fill="#fff0cf" />
+        <rect x="478" y="319" width="44" height="10" fill="#fff0cf" />
+        <rect x="491" y="315" width="5" height="4" fill="#344449" />
+        <rect x="504" y="315" width="5" height="4" fill="#344449" />
+        <rect x="493" y="329" width="14" height="3" fill="#a8694c" />
+        <g v-for="(seat, index) in [[500, 245], [500, 409], [378, 327], [622, 327]]" :key="`seat-${index}`">
+          <rect :x="seat[0] - 18" :y="seat[1] - 8" width="36" height="16" fill="#26383b" />
+          <rect :x="seat[0] - 12" :y="seat[1] - 4" width="24" height="4" fill="#b9f064" />
+        </g>
+
+        <g v-for="(plant, index) in [[72, 151], [928, 151], [72, 500], [928, 500]]" :key="`plant-${index}`">
+          <rect :x="plant[0] - 16" :y="plant[1] + 5" width="32" height="24" fill="#cc8750" />
+          <rect :x="plant[0] - 11" :y="plant[1] - 16" width="9" height="24" fill="#578653" />
+          <rect :x="plant[0] + 3" :y="plant[1] - 27" width="10" height="34" fill="#74a35b" />
+          <rect :x="plant[0] - 24" :y="plant[1] - 17" width="17" height="11" fill="#77a85e" />
+          <rect :x="plant[0] + 10" :y="plant[1] - 12" width="18" height="12" fill="#4d8054" />
+          <rect :x="plant[0] - 7" :y="plant[1] - 34" width="18" height="13" fill="#86b362" />
+        </g>
+
+        <g
           v-for="(character, index) in characters"
-          :key="character.agent?.name ?? index"
-          :position="character.position"
-          :rotation="[0, character.rotation, 0]"
+          :key="character.agent?.name ?? `agent-${index}`"
+          class="office-agent"
+          :class="{
+            'office-agent-selected': selectedIndex === index,
+            'office-agent-active': character.active,
+          }"
+          :transform="`translate(${character.x} ${character.y})`"
+          role="button"
+          tabindex="0"
+          :aria-label="`${character.agent?.display_name ?? shortName(character.agent?.name, index)} — ${statusLabels[character.agent?.status ?? 'offline']}. Pilih untuk melihat detail.`"
+          :aria-pressed="selectedIndex === index"
+          @click="selectAgent(index)"
+          @keydown.enter.prevent="selectAgent(index)"
+          @keydown.space.prevent="selectAgent(index)"
         >
-          <TresMesh :position="[0, 0.075, 0]" cast-shadow>
-            <TresBoxGeometry :args="[0.38, 0.12, 0.32]" />
-            <TresMeshStandardMaterial color="#26363b" roughness="1" flat-shading />
-          </TresMesh>
-          <TresGroup :position="[-0.105, 0.22, 0]" :rotation="[character.gait, 0, 0]">
-            <TresMesh :position="[0, 0.13, 0]" cast-shadow>
-              <TresBoxGeometry :args="[0.13, 0.3, 0.17]" />
-              <TresMeshStandardMaterial color="#41545c" roughness="1" flat-shading />
-            </TresMesh>
-            <TresMesh :position="[0, 0.29, 0.025]" cast-shadow>
-              <TresBoxGeometry :args="[0.16, 0.075, 0.25]" />
-              <TresMeshStandardMaterial color="#ead1a5" roughness="1" flat-shading />
-            </TresMesh>
-          </TresGroup>
-          <TresGroup :position="[0.105, 0.22, 0]" :rotation="[-character.gait, 0, 0]">
-            <TresMesh :position="[0, 0.13, 0]" cast-shadow>
-              <TresBoxGeometry :args="[0.13, 0.3, 0.17]" />
-              <TresMeshStandardMaterial color="#41545c" roughness="1" flat-shading />
-            </TresMesh>
-            <TresMesh :position="[0, 0.29, 0.025]" cast-shadow>
-              <TresBoxGeometry :args="[0.16, 0.075, 0.25]" />
-              <TresMeshStandardMaterial color="#ead1a5" roughness="1" flat-shading />
-            </TresMesh>
-          </TresGroup>
-          <TresMesh :position="[0, 0.58, 0]" cast-shadow>
-            <TresBoxGeometry :args="[0.46, 0.47, 0.3]" />
-            <TresMeshStandardMaterial :color="character.color" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.47, 0.158]">
-            <TresBoxGeometry :args="[0.13, 0.075, 0.018]" />
-            <TresMeshBasicMaterial color="#f6e6bd" />
-          </TresMesh>
-          <TresGroup :position="[-0.28, 0.68, 0]" :rotation="[0, 0, -0.12 + character.gait * 0.7]">
-            <TresMesh :position="[0, 0.02, 0]" cast-shadow>
-              <TresBoxGeometry :args="[0.14, 0.34, 0.17]" />
-              <TresMeshStandardMaterial :color="character.color" roughness="1" flat-shading />
-            </TresMesh>
-            <TresMesh :position="[0, -0.17, 0.025]">
-              <TresBoxGeometry :args="[0.12, 0.1, 0.15]" />
-              <TresMeshStandardMaterial color="#efc99c" roughness="1" flat-shading />
-            </TresMesh>
-          </TresGroup>
-          <TresGroup :position="[0.28, 0.68, 0]" :rotation="[0, 0, 0.12 - character.gait * 0.7]">
-            <TresMesh :position="[0, 0.02, 0]" cast-shadow>
-              <TresBoxGeometry :args="[0.14, 0.34, 0.17]" />
-              <TresMeshStandardMaterial :color="character.color" roughness="1" flat-shading />
-            </TresMesh>
-            <TresMesh :position="[0, -0.17, 0.025]">
-              <TresBoxGeometry :args="[0.12, 0.1, 0.15]" />
-              <TresMeshStandardMaterial color="#efc99c" roughness="1" flat-shading />
-            </TresMesh>
-          </TresGroup>
-          <TresMesh :position="[0, 0.99, 0.015]" cast-shadow>
-            <TresBoxGeometry :args="[0.39, 0.39, 0.34]" />
-            <TresMeshStandardMaterial color="#e9bb89" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 1.17, -0.005]" cast-shadow>
-            <TresBoxGeometry :args="[0.43, 0.16, 0.38]" />
-            <TresMeshStandardMaterial color="#493d3a" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[-0.085, 1.01, 0.19]">
-            <TresBoxGeometry :args="[0.055, 0.055, 0.025]" />
-            <TresMeshBasicMaterial color="#203236" />
-          </TresMesh>
-          <TresMesh :position="[0.085, 1.01, 0.19]">
-            <TresBoxGeometry :args="[0.055, 0.055, 0.025]" />
-            <TresMeshBasicMaterial color="#203236" />
-          </TresMesh>
-          <TresMesh :position="[0, 0.86, 0.185]">
-            <TresBoxGeometry :args="[0.11, 0.035, 0.025]" />
-            <TresMeshBasicMaterial :color="statusColor(character.agent?.status)" />
-          </TresMesh>
-          <TresMesh :position="[0, 1.4, 0]">
-            <TresBoxGeometry :args="[0.3, 0.035, 0.08]" />
-            <TresMeshBasicMaterial :color="statusColor(character.agent?.status)" />
-          </TresMesh>
-        </TresGroup>
+          <rect class="agent-selection-ring" x="-34" y="-37" width="68" height="77" />
+          <rect x="-16" y="31" width="32" height="5" fill="#263638" opacity=".28" />
+          <rect x="-13" y="20" width="9" height="13" fill="#34474a" />
+          <rect x="4" y="20" width="9" height="13" fill="#34474a" />
+          <rect x="-17" y="2" width="34" height="20" fill="#263638" />
+          <rect x="-15" y="1" width="30" height="18" :fill="character.color" />
+          <rect x="-21" y="5" width="6" height="12" :fill="character.color" />
+          <rect x="15" y="5" width="6" height="12" :fill="character.color" />
+          <rect x="-12" y="-4" width="24" height="7" fill="#263638" />
+          <rect x="-13" y="-19" width="26" height="17" fill="#e7c39d" />
+          <rect x="-17" y="-16" width="4" height="10" fill="#e7c39d" />
+          <rect x="13" y="-16" width="4" height="10" fill="#e7c39d" />
+          <rect x="-15" y="-25" width="30" height="8" fill="#403d39" />
+          <rect x="-11" y="-30" width="22" height="5" fill="#403d39" />
+          <rect x="-10" y="-15" width="4" height="4" fill="#263638" />
+          <rect x="6" y="-15" width="4" height="4" fill="#263638" />
+          <rect x="-3" y="-5" width="6" height="3" fill="#aa6652" />
+          <rect x="-12" y="6" width="24" height="3" fill="#ffffff" opacity=".32" />
+          <rect x="22" y="-28" width="10" height="10" :fill="statusColor(character.agent?.status)" stroke="#f3efe6" stroke-width="2" />
+          <g v-if="index === 0">
+            <rect x="-15" y="-20" width="4" height="10" fill="#d2b783" />
+            <rect x="-19" y="-18" width="4" height="6" fill="#d2b783" />
+          </g>
+          <g v-else-if="index === 1">
+            <rect x="-11" y="-16" width="8" height="6" fill="none" stroke="#5e6c63" stroke-width="2" />
+            <rect x="3" y="-16" width="8" height="6" fill="none" stroke="#5e6c63" stroke-width="2" />
+          </g>
+          <g v-else-if="index === 2">
+            <rect x="-16" y="-26" width="32" height="6" fill="#81584a" />
+            <rect x="-19" y="-21" width="5" height="13" fill="#81584a" />
+          </g>
+          <g v-else>
+            <rect x="-17" y="-15" width="5" height="8" fill="#d2b783" />
+            <rect x="12" y="-15" width="5" height="8" fill="#d2b783" />
+            <rect x="-17" y="-20" width="5" height="5" fill="#d2b783" />
+            <rect x="12" y="-20" width="5" height="5" fill="#d2b783" />
+          </g>
+          <g class="agent-nameplate">
+            <rect x="-49" y="-57" width="98" height="17" fill="#263638" />
+            <text x="0" y="-45" text-anchor="middle" fill="#fbf9f3" font-size="9" font-family="monospace" font-weight="600">
+              {{ character.agent?.display_name ?? shortName(character.agent?.name, index) }}
+            </text>
+          </g>
+        </g>
 
-        <TresGroup v-for="(plant, index) in plants" :key="`plant-${index}`" :position="[plant.x, 0, plant.z]">
-          <TresMesh :position="[0, 0.16, 0]">
-            <TresCylinderGeometry :args="[0.24, 0.31, 0.32, 6]" />
-            <TresMeshStandardMaterial color="#d89455" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.56, 0]">
-            <TresBoxGeometry :args="[0.09, 0.58, 0.09]" />
-            <TresMeshStandardMaterial color="#507e53" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[-0.17, 0.61, 0]">
-            <TresBoxGeometry :args="[0.27, 0.19, 0.21]" />
-            <TresMeshStandardMaterial color="#72a85e" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0.18, 0.73, 0.015]">
-            <TresBoxGeometry :args="[0.29, 0.2, 0.22]" />
-            <TresMeshStandardMaterial color="#508c58" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh :position="[0, 0.91, -0.025]">
-            <TresBoxGeometry :args="[0.28, 0.23, 0.25]" />
-            <TresMeshStandardMaterial color="#8ab65f" roughness="1" flat-shading />
-          </TresMesh>
-        </TresGroup>
-
-        <TresGroup v-for="(x, index) in [-5.2, 5.2]" :key="`shelf-${index}`" :position="[x, 0, -0.3]">
-          <TresMesh :position="[0, 0.73, 0]" cast-shadow>
-            <TresBoxGeometry :args="[0.6, 1.48, 0.8]" />
-            <TresMeshStandardMaterial color="#704b3d" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh v-for="y in [0.38, 0.82, 1.26]" :key="`shelf-${y}`" :position="[0, y, 0.41]">
-            <TresBoxGeometry :args="[0.56, 0.055, 0.08]" />
-            <TresMeshStandardMaterial color="#e2a15c" roughness="1" flat-shading />
-          </TresMesh>
-          <TresMesh v-for="(item, itemIndex) in [0, 1, 2]" :key="`books-${itemIndex}`" :position="[-0.16 + itemIndex * 0.14, 0.52 + (itemIndex % 2) * 0.44, 0.33]">
-            <TresBoxGeometry :args="[0.1, 0.2 + (itemIndex % 2) * 0.08, 0.1]" />
-            <TresMeshStandardMaterial :color="itemIndex === 1 ? '#c46c52' : '#78a49a'" roughness="1" flat-shading />
-          </TresMesh>
-        </TresGroup>
-      </TresCanvas>
-      <template #fallback>
-        <div class="scene-loading">Membuka ruang kerja NF...</div>
-      </template>
-    </ClientOnly>
+        <rect x="40" y="568" width="920" height="12" fill="#394847" />
+        <rect x="450" y="566" width="100" height="14" fill="#b9f064" />
+        <text x="500" y="557" text-anchor="middle" fill="#f5e7c8" font-size="10" font-family="monospace" letter-spacing="2">
+          NF OFFICE · COLLABORATION FLOOR
+        </text>
+      </svg>
+      <div class="scene-legend" aria-hidden="true">
+        <span><i class="legend-active" /> Aktif</span>
+        <span><i class="legend-idle" /> Siap</span>
+        <span><i class="legend-table" /> Kolaborasi</span>
+      </div>
+    </div>
+    <div v-if="selectedCharacter" class="scene-inspector" aria-live="polite">
+      <span class="inspector-avatar" :style="{ '--agent-color': selectedCharacter.color }">
+        {{ selectedCharacter.agent?.display_name.slice(0, 1) ?? 'A' }}
+      </span>
+      <span class="inspector-copy">
+        <strong>{{ selectedCharacter.agent?.display_name ?? shortName(selectedCharacter.agent?.name, selectedIndex) }}</strong>
+        <small>{{ selectedCharacter.agent?.role ?? 'Menunggu status agent dari backend' }}</small>
+      </span>
+      <span class="inspector-status">
+        <i :style="{ '--status-color': statusColor(selectedCharacter.agent?.status) }" />
+        {{ statusLabels[selectedCharacter.agent?.status ?? 'offline'] }}
+      </span>
+      <span class="inspector-hint">Klik karakter untuk melihat</span>
+    </div>
   </div>
 </template>

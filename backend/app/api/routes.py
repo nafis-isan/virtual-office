@@ -1,9 +1,17 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models import Agent, AgentActivity, Artifact, Approval, Message, Task
+from app.models import (
+    Agent,
+    AgentActivity,
+    Artifact,
+    Approval,
+    KnowledgeDocument,
+    Message,
+    Task,
+)
 from app.schemas.tasks import (
     ActivityRead,
     AgentRead,
@@ -13,8 +21,10 @@ from app.schemas.tasks import (
     TaskCreated,
     TaskDetail,
     TaskSummary,
+    KnowledgeDocumentRead,
 )
 from app.services.orchestrator import run_task
+from app.services.knowledge import index_upload, remove_document
 
 router = APIRouter(prefix="/api")
 MAX_ACTIVE_TASKS = 3
@@ -91,6 +101,30 @@ def list_agents(db: Session = Depends(get_db)) -> list[AgentRead]:
         )
         for name, display_name, role in AGENT_DIRECTORY
     ]
+
+
+@router.get("/knowledge", response_model=list[KnowledgeDocumentRead])
+def list_knowledge_documents(db: Session = Depends(get_db)) -> list[KnowledgeDocument]:
+    return list(
+        db.scalars(select(KnowledgeDocument).order_by(KnowledgeDocument.created_at.desc())).all()
+    )
+
+
+@router.post("/knowledge", response_model=KnowledgeDocumentRead, status_code=201)
+async def upload_knowledge_document(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> KnowledgeDocument:
+    return await index_upload(db, file)
+
+
+@router.delete("/knowledge/{document_id}", status_code=204)
+def delete_knowledge_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+) -> None:
+    if not remove_document(db, document_id):
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan.")
 
 
 @router.get("/tasks/{task_id}/activities", response_model=list[ActivityRead])

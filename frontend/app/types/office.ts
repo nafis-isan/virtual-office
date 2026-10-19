@@ -59,3 +59,11 @@ export interface TaskCreated {
   id: number
   status: string
 }
+
+export interface KnowledgeDocument {
+  id: number
+  filename: string
+  content_type: string
+  chunk_count: number
+  created_at: string
+}

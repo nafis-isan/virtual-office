@@ -1,6 +1,7 @@
 import type {
   Activity,
   Agent,
+  KnowledgeDocument,
   Task,
   TaskCreated,
   TaskDetail,
@@ -43,5 +44,29 @@ export function useOfficeApi() {
     )
   }
 
-  return { getAgents, getTasks, getTask, getActivities, createTask, getHealth }
+  async function getKnowledgeDocuments() {
+    return request<KnowledgeDocument[]>('/api/knowledge')
+  }
+
+  async function uploadKnowledgeDocument(file: File) {
+    const body = new FormData()
+    body.append('file', file)
+    return request<KnowledgeDocument>('/api/knowledge', { method: 'POST', body })
+  }
+
+  async function deleteKnowledgeDocument(documentId: number) {
+    return request<void>(`/api/knowledge/${documentId}`, { method: 'DELETE' })
+  }
+
+  return {
+    getAgents,
+    getTasks,
+    getTask,
+    getActivities,
+    createTask,
+    getHealth,
+    getKnowledgeDocuments,
+    uploadKnowledgeDocument,
+    deleteKnowledgeDocument,
+  }
 }

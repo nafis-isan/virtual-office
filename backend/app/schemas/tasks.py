@@ -93,3 +93,13 @@ class ArtifactRead(BaseModel):
 class ApprovalDecision(BaseModel):
     decision: Literal["approve", "reject"]
     note: str | None = Field(default=None, max_length=500)
+
+
+class KnowledgeDocumentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    filename: str
+    content_type: str
+    chunk_count: int
+    created_at: datetime

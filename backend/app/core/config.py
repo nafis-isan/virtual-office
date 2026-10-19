@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     frontend_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     gemini_api_key: str = ""
     gemini_model: str = ""
+    gemini_embedding_model: str = "gemini-embedding-001"
     workspace_root: str = "../workspace"
     max_instruction_length: int = 4000
     max_output_length: int = 12000

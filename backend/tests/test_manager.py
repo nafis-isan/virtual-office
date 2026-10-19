@@ -33,6 +33,20 @@ def test_create_plan_validates_and_trims_steps(monkeypatch):
     }
 
 
+def test_create_plan_passes_retrieved_context_to_project_manager(monkeypatch):
+    captured = {}
+
+    def fake_generate(prompt, **_kwargs):
+        captured["prompt"] = prompt
+        return '{"summary":"Rencana","steps":[{"agent":"researcher","title":"Riset","expected_output":"Ringkasan"}]}'
+
+    monkeypatch.setattr(manager, "generate_text", fake_generate)
+
+    manager.create_plan("Cari aturan", context="[S1] Sumber: panduan.md\nAturan internal")
+
+    assert "[S1] Sumber: panduan.md" in captured["prompt"]
+
+
 @pytest.mark.parametrize(
     "response",
     [
