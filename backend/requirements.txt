@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+pymysql==1.2.3
+alembic==1.20.0
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+google-genai==1.2.0
+httpx==0.28.1
+pytest==8.4.2

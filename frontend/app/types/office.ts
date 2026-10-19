@@ -1,0 +1,61 @@
+export type AgentStatus =
+  | 'idle'
+  | 'thinking'
+  | 'working'
+  | 'waiting'
+  | 'waiting_approval'
+  | 'completed'
+  | 'failed'
+  | 'offline'
+
+export interface Agent {
+  name: string
+  display_name: string
+  role: string
+  status: AgentStatus
+}
+
+export interface TaskStep {
+  id: number
+  position: number
+  agent_name: string
+  title: string
+  expected_output: string
+  status: string
+  output: string | null
+}
+
+export interface TaskMessage {
+  id: number
+  sender: string
+  content: string
+  created_at: string
+}
+
+export interface Task {
+  id: number
+  instruction: string
+  status: string
+  summary: string | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskDetail extends Task {
+  steps: TaskStep[]
+  messages: TaskMessage[]
+}
+
+export interface Activity {
+  id: number
+  agent_name: string
+  status: string
+  message: string
+  created_at: string
+}
+
+export interface TaskCreated {
+  id: number
+  status: string
+}
