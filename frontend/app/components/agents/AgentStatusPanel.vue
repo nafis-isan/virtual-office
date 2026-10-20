@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Agent, AgentStatus } from '~/types/office'
 
-defineProps<{ agents: Agent[]; loading: boolean }>()
+defineProps<{ agents: Agent[]; loading: boolean; selectedAgentName?: string | null }>()
+defineEmits<{ select: [agentName: string] }>()
 
 const labels: Record<AgentStatus, string> = {
   idle: 'Siap',
@@ -26,7 +27,16 @@ const labels: Record<AgentStatus, string> = {
     </div>
     <p v-if="loading" class="muted small-copy">Memuat status dari backend...</p>
     <div v-else class="agent-list">
-      <article v-for="agent in agents" :key="agent.name" class="agent-row">
+      <button
+        v-for="agent in agents"
+        :key="agent.name"
+        class="agent-row"
+        :class="{
+          'agent-row-selected': agent.name === selectedAgentName || agent.status === 'working' || agent.status === 'thinking',
+        }"
+        type="button"
+        @click="$emit('select', agent.name)"
+      >
         <div class="agent-avatar" :class="`avatar-${agent.name}`">
           {{ agent.display_name.slice(0, 1) }}
         </div>
@@ -37,7 +47,7 @@ const labels: Record<AgentStatus, string> = {
         <span class="status-pill" :class="`status-${agent.status}`">
           <i />{{ labels[agent.status] }}
         </span>
-      </article>
+      </button>
       <p v-if="agents.length === 0" class="muted small-copy">
         Status agent belum tersedia. Pastikan backend dan database berjalan.
       </p>

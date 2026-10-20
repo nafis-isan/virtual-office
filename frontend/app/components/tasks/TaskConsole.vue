@@ -5,7 +5,7 @@ defineProps<{ tasks: Task[]; selectedId: number | null; loading: boolean }>()
 defineEmits<{ select: [taskId: number] }>()
 
 const taskStatus: Record<string, string> = {
-  thinking: 'Menganalisis',
+  thinking: 'Menyusun rencana',
   working: 'Berjalan',
   waiting: 'Menunggu',
   waiting_approval: 'Perlu persetujuan',
@@ -25,7 +25,7 @@ function shortDate(date: string) {
     <div class="panel-heading">
       <div>
         <p class="eyebrow">RIWAYAT</p>
-        <h2>Task console</h2>
+        <h2>Riwayat tugas</h2>
       </div>
       <span class="count-badge">{{ tasks.length }}</span>
     </div>

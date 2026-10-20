@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { Activity, Agent, Task, TaskDetail } from '~/types/office'
 
+type ActivityView = 'office' | 'agents' | 'tasks' | 'knowledge'
+type EditorTab = 'overview' | 'steps' | 'output' | 'sources'
+type BottomTab = 'problems' | 'output' | 'terminal'
+
 useHead({
   title: 'NF Office AI Workspace',
   meta: [{ name: 'description', content: 'NF Office AI Workspace — ruang kerja tim agent AI.' }],
@@ -12,7 +16,22 @@ const tasks = ref<Task[]>([])
 const selectedTask = ref<TaskDetail | null>(null)
 const activities = ref<Activity[]>([])
 const selectedId = ref<number | null>(null)
-const health = ref<{ status: string; database: string; gemini_configured: boolean } | null>(null)
+const openTaskIds = ref<number[]>([])
+const activeEditorId = ref<number | 'office'>('office')
+const activityView = ref<ActivityView>('office')
+const editorTab = ref<EditorTab>('overview')
+const bottomTab = ref<BottomTab>('problems')
+const bottomOpen = ref(true)
+const sidebarOpen = ref(true)
+const composerOpen = ref(false)
+const selectedAgentName = ref<string | null>(null)
+const searchQuery = ref('')
+const searchInput = ref<HTMLInputElement | null>(null)
+const health = ref<{
+  status: string
+  database: string
+  gemini_configured: boolean
+} | null>(null)
 const loading = ref(true)
 const sending = ref(false)
 const errorMessage = ref('')
@@ -23,6 +42,40 @@ const connectionLabel = computed(() => {
   if (!health.value) return 'Menghubungkan...'
   return health.value.database === 'connected' ? 'Backend terhubung' : 'Database terputus'
 })
+const activeTask = computed(() =>
+  activeEditorId.value === 'office' || selectedTask.value?.id !== activeEditorId.value
+    ? null
+    : selectedTask.value,
+)
+const activeAgent = computed(() =>
+  agents.value.find((agent) => agent.name === selectedAgentName.value) ?? null,
+)
+const filteredTasks = computed(() => {
+  const query = searchQuery.value.trim().toLocaleLowerCase('id')
+  if (!query) return tasks.value
+  return tasks.value.filter((task) =>
+    `${task.instruction} ${task.summary ?? ''} ${task.status}`.toLocaleLowerCase('id').includes(query),
+  )
+})
+const activeTaskLabel = computed(() => {
+  if (!selectedTask.value) return 'Tidak ada task aktif'
+  const title = selectedTask.value.instruction.replace(/\s+/g, ' ').trim()
+  return `#${selectedTask.value.id} ${title.length > 42 ? `${title.slice(0, 39)}...` : title}`
+})
+const problemCount = computed(() => {
+  const taskErrors = tasks.value.filter((task) => task.status === 'failed').length
+  const configError = health.value && !health.value.gemini_configured ? 1 : 0
+  return taskErrors + configError + (errorMessage.value ? 1 : 0)
+})
+const outputActivities = computed(() => [...activities.value].reverse().slice(0, 24))
+const terminalLines = computed(() => [
+  `[workspace] Backend: ${health.value?.status ?? 'menghubungkan'} · Database: ${health.value?.database ?? 'tidak diketahui'}`,
+  `[provider] Gemini: ${health.value?.gemini_configured ? 'siap' : 'belum diatur'}`,
+  selectedTask.value
+    ? `[tugas #${selectedTask.value.id}] ${selectedTask.value.status} · ${selectedTask.value.instruction}`
+    : '[tugas] Belum ada tugas yang dipilih.',
+  '[status] Baca-saja. Agent tidak menjalankan perintah shell.',
+])
 
 function getErrorMessage(error: unknown) {
   if (typeof error === 'object' && error !== null && 'data' in error) {
@@ -32,6 +85,21 @@ function getErrorMessage(error: unknown) {
     }
   }
   return 'Tidak dapat menghubungi backend. Periksa server FastAPI dan alamat API di frontend/.env.'
+}
+
+async function loadTask(taskId: number) {
+  selectedId.value = taskId
+  try {
+    const [detail, taskActivities] = await Promise.all([
+      api.getTask(taskId),
+      api.getActivities(taskId),
+    ])
+    if (selectedId.value !== taskId) return
+    selectedTask.value = detail
+    activities.value = taskActivities
+  } catch (error) {
+    if (selectedId.value === taskId) errorMessage.value = getErrorMessage(error)
+  }
 }
 
 async function refreshDashboard() {
@@ -46,11 +114,7 @@ async function refreshDashboard() {
     const [agentsResult, tasksResult] = await Promise.all([api.getAgents(), api.getTasks()])
     agents.value = agentsResult
     tasks.value = tasksResult
-    if (selectedId.value !== null) {
-      const detail = await api.getTask(selectedId.value)
-      selectedTask.value = detail
-      activities.value = await api.getActivities(selectedId.value)
-    }
+    if (selectedId.value !== null) await loadTask(selectedId.value)
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
     health.value = null
@@ -61,13 +125,19 @@ async function refreshDashboard() {
 }
 
 async function selectTask(taskId: number) {
-  selectedId.value = taskId
   errorMessage.value = ''
-  try {
-    selectedTask.value = await api.getTask(taskId)
-    activities.value = await api.getActivities(taskId)
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error)
+  activeEditorId.value = taskId
+  editorTab.value = 'overview'
+  selectedAgentName.value = null
+  if (!openTaskIds.value.includes(taskId)) openTaskIds.value.push(taskId)
+  await loadTask(taskId)
+}
+
+function closeTaskTab(taskId: number) {
+  openTaskIds.value = openTaskIds.value.filter((id) => id !== taskId)
+  if (activeEditorId.value === taskId) {
+    activeEditorId.value = 'office'
+    selectedAgentName.value = null
   }
 }
 
@@ -77,6 +147,11 @@ async function submitInstruction(instruction: string) {
   try {
     const created = await api.createTask(instruction)
     selectedId.value = created.id
+    if (!openTaskIds.value.includes(created.id)) openTaskIds.value.push(created.id)
+    activeEditorId.value = created.id
+    activityView.value = 'tasks'
+    composerOpen.value = false
+    editorTab.value = 'overview'
     await refreshDashboard()
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
@@ -85,73 +160,263 @@ async function submitInstruction(instruction: string) {
   }
 }
 
+function startNewTask() {
+  activityView.value = 'tasks'
+  composerOpen.value = true
+  sidebarOpen.value = true
+  nextTick(() => document.querySelector<HTMLTextAreaElement>('#task-instruction')?.focus())
+}
+
+async function selectAgent(agentName: string) {
+  selectedAgentName.value = agentName
+  activityView.value = 'agents'
+  const firstTask = tasks.value[0]
+  if (!selectedTask.value && firstTask) {
+    await selectTask(firstTask.id)
+    selectedAgentName.value = agentName
+    editorTab.value = 'steps'
+    return
+  }
+  if (selectedTask.value) {
+    const taskId = selectedTask.value.id
+    activeEditorId.value = taskId
+    if (!openTaskIds.value.includes(taskId)) {
+      openTaskIds.value.push(taskId)
+    }
+    editorTab.value = 'steps'
+  }
+}
+
+function handleShortcut(event: KeyboardEvent) {
+  const key = event.key.toLowerCase()
+  if ((event.ctrlKey || event.metaKey) && key === 'n') {
+    event.preventDefault()
+    startNewTask()
+  } else if ((event.ctrlKey || event.metaKey) && key === 'b') {
+    event.preventDefault()
+    sidebarOpen.value = !sidebarOpen.value
+  } else if ((event.ctrlKey || event.metaKey) && key === 'j') {
+    event.preventDefault()
+    bottomOpen.value = !bottomOpen.value
+  } else if ((event.ctrlKey || event.metaKey) && key === 'k') {
+    event.preventDefault()
+    if (activityView.value !== 'knowledge') activityView.value = 'tasks'
+    sidebarOpen.value = true
+    nextTick(() => searchInput.value?.focus())
+  } else if (event.key === 'Escape' && composerOpen.value) {
+    composerOpen.value = false
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', handleShortcut)
+  if (window.matchMedia('(max-width: 680px)').matches) sidebarOpen.value = false
   await refreshDashboard()
   pollTimer = setInterval(refreshDashboard, 2500)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleShortcut)
   if (pollTimer) clearInterval(pollTimer)
 })
 </script>
 
 <template>
-  <main class="app-shell">
-    <header class="topbar">
-      <NuxtLink class="brand" to="/" aria-label="NF Office AI Workspace beranda">
-        <span class="brand-mark"><i /><i /><i /><i /></span>
-        <span class="brand-wordmark"><strong>NF</strong><span>Office</span><small>AI WORKSPACE</small></span>
+  <main class="ide-shell">
+    <header class="ide-titlebar">
+      <NuxtLink class="brand ide-brand" to="/" aria-label="NF Office AI Workspace beranda">
+        <span class="brand-wordmark-nf"><strong>NF</strong><span>Office</span></span>
       </NuxtLink>
-      <div class="topbar-right">
-        <span class="connection-pill" :class="{ 'connection-offline': !isReady }">
-          <i />{{ connectionLabel }}
-        </span>
-        <span class="date-label">RUANG KERJA · LOKAL</span>
-        <div class="user-mark">NF</div>
+      <div class="titlebar-center"><span>Ruang kerja lokal</span></div>
+      <div class="titlebar-actions">
+        <span class="connection-pill" :class="{ 'connection-offline': !isReady }"><i />{{ connectionLabel }}</span>
+        <button class="titlebar-new-task" type="button" @click="startNewTask"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg> Tugas baru <kbd>Ctrl N</kbd></button>
       </div>
     </header>
 
-    <section class="welcome-row">
-      <div>
-        <p class="eyebrow">NF OFFICE <span class="heading-divider">/</span> WORKSPACE HARI INI</p>
-        <h1>Ruang kerja <span>tim AI.</span></h1>
-        <p class="welcome-subtitle">Satu instruksi. Kolaborasi yang terlihat. Hasil yang bisa ditinjau.</p>
-      </div>
-      <div class="welcome-note"><span class="welcome-signal" /><div><strong>4 agent terhubung</strong><small>Status mengikuti aktivitas backend</small></div></div>
-    </section>
-
-    <div v-if="errorMessage" class="connection-error" role="alert">
-      <span>{{ errorMessage }}</span>
+    <div v-if="errorMessage" class="ide-error" role="alert">
+      <span class="error-icon">!</span><span>{{ errorMessage }}</span>
       <button type="button" aria-label="Tutup pesan" @click="errorMessage = ''">×</button>
     </div>
 
-    <section class="dashboard-grid">
-      <div class="scene-column">
-        <div class="section-heading">
-          <div><p class="eyebrow">PETA RUANG KERJA <span class="heading-divider">/</span> 01</p><h2>Office floor</h2></div>
-          <span class="scene-caption"><i /> AGENT AKTIF MENUJU MEJA TIM</span>
+    <div class="ide-layout" :class="{ 'sidebar-collapsed': !sidebarOpen }">
+      <nav class="activity-bar" aria-label="Workspace navigation">
+        <button
+          v-for="item in [
+            { id: 'office', label: 'Kantor' },
+            { id: 'agents', label: 'Agent' },
+            { id: 'tasks', label: 'Tugas' },
+            { id: 'knowledge', label: 'Dokumen' },
+          ] as const"
+          :key="item.id"
+          type="button"
+          class="activity-button"
+          :class="{ 'activity-button-active': activityView === item.id }"
+          :aria-label="item.label"
+          :title="item.label"
+          @click="activityView = item.id; sidebarOpen = true"
+        >
+          <svg v-if="item.id === 'office'" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="1" /><path d="M7 3v14M13 3v14M3 8h14M3 13h14" /></svg>
+          <svg v-else-if="item.id === 'agents'" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6.5" r="3" /><path d="M4.5 17c.4-3.1 2.4-4.8 5.5-4.8s5.1 1.7 5.5 4.8" /></svg>
+          <svg v-else-if="item.id === 'tasks'" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h9M7 10h9M7 15h9" /><path d="m3.5 5 .8.8L5.7 4M3.5 10l.8.8 1.4-1.8M3.5 15l.8.8 1.4-1.8" /></svg>
+          <svg v-else viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 4.5h5l1.5 1.8h6.5v9.2H3.5z" /><path d="M3.5 7.5h13" /></svg>
+          <small>{{ item.label }}</small>
+        </button>
+        <button
+          class="activity-bottom-toggle"
+          type="button"
+          :aria-label="sidebarOpen ? 'Sembunyikan sidebar' : 'Tampilkan sidebar'"
+          title="Toggle sidebar (Ctrl+B)"
+          @click="sidebarOpen = !sidebarOpen"
+        ><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M6 3v10" /></svg></button>
+      </nav>
+
+      <aside v-if="sidebarOpen" class="ide-sidebar">
+        <div class="sidebar-heading">
+          <strong>{{ activityView === 'office' ? 'OFFICE' : activityView.toUpperCase() }}</strong>
+          <button type="button" aria-label="Sembunyikan sidebar" title="Sembunyikan sidebar (Ctrl+B)" @click="sidebarOpen = false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5" /></svg></button>
         </div>
-        <OfficeScene :agents="agents" :task="selectedTask" :activities="activities" />
-        <AgentsAgentStatusPanel :agents="agents" :loading="loading" />
-      </div>
-      <div class="workspace-column">
-        <ChatPanel :sending="sending" :disabled="!isReady" @submit="submitInstruction" />
-        <KnowledgeLibrary />
-        <TasksTaskConsole
-          :tasks="tasks"
-          :selected-id="selectedId"
-          :loading="loading"
-          @select="selectTask"
-        />
-        <TasksTaskDetails :task="selectedTask" :activities="activities" :loading="false" />
-      </div>
-    </section>
-    <footer class="app-footer">
-      <span>NF OFFICE <i>·</i> AI WORKSPACE</span>
-      <span v-if="health && !health.gemini_configured" class="footer-warning">
-        Gemini belum dikonfigurasi — tambahkan GEMINI_API_KEY dan GEMINI_MODEL di backend/.env.
-      </span>
-      <span v-else>API key tersimpan di backend, tidak di browser.</span>
+
+        <template v-if="activityView === 'office'">
+          <div class="sidebar-workspace">
+            <span class="sidebar-section-label">RUANG KERJA</span>
+            <button class="sidebar-entry sidebar-entry-current" type="button" @click="activeEditorId = 'office'">
+              <span class="sidebar-entry-icon">01</span><span>Lantai kantor</span><i class="sidebar-live-dot" />
+            </button>
+            <button class="sidebar-entry" type="button" @click="startNewTask">
+              <span class="sidebar-entry-icon sidebar-entry-plus"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></span><span>Tugas baru</span><kbd>Ctrl N</kbd>
+            </button>
+          </div>
+          <div class="sidebar-quick-status">
+            <span class="sidebar-section-label">STATUS LAYANAN</span>
+            <div><i :class="{ 'is-offline': !isReady }" /><span>{{ isReady ? 'Backend tersambung' : 'Backend offline' }}</span></div>
+            <div><i :class="{ 'is-offline': !health?.gemini_configured }" /><span>Gemini {{ health?.gemini_configured ? 'siap' : 'belum diatur' }}</span></div>
+            <p>Pergerakan agent mengikuti aktivitas tugas.</p>
+          </div>
+        </template>
+
+        <template v-else-if="activityView === 'agents'">
+          <div class="sidebar-section-title"><span class="sidebar-section-label">TIM AGENT</span><small>{{ agents.length }} terdaftar</small></div>
+          <AgentsAgentStatusPanel :agents="agents" :loading="loading" :selected-agent-name="selectedAgentName" @select="selectAgent" />
+          <p class="sidebar-hint">Pilih agent untuk melihat langkah dan hasil tugasnya.</p>
+        </template>
+
+        <template v-else-if="activityView === 'tasks'">
+          <div class="sidebar-section-title"><span class="sidebar-section-label">DAFTAR TUGAS</span><button type="button" @click="startNewTask"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg> Baru</button></div>
+          <label class="sidebar-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" /><path d="m12.2 12.2 4 4" /></svg><input ref="searchInput" v-model="searchQuery" type="search" placeholder="Cari tugas..." aria-label="Cari tugas"><kbd>Ctrl K</kbd></label>
+          <ChatPanel v-if="composerOpen" :sending="sending" :disabled="!isReady" @submit="submitInstruction" />
+          <TasksTaskConsole
+            :tasks="filteredTasks"
+            :selected-id="selectedId"
+            :loading="loading"
+            @select="selectTask"
+          />
+        </template>
+
+        <template v-else>
+          <div class="sidebar-section-title"><span class="sidebar-section-label">PUSTAKA DOKUMEN</span><small>RAG</small></div>
+          <label class="sidebar-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" /><path d="m12.2 12.2 4 4" /></svg><input ref="searchInput" v-model="searchQuery" type="search" placeholder="Cari dokumen..." aria-label="Cari dokumen"><kbd>Ctrl K</kbd></label>
+          <KnowledgeLibrary :search="searchQuery" />
+        </template>
+      </aside>
+
+      <section class="ide-main" :class="{ 'ide-main-office': activeEditorId === 'office' }">
+        <div class="editor-tabs" role="tablist" aria-label="Open editors">
+          <div
+            class="editor-tab"
+            :class="{ 'editor-tab-active': activeEditorId === 'office' }"
+          ><button class="editor-tab-main" role="tab" :aria-selected="activeEditorId === 'office'" type="button" @click="activeEditorId = 'office'"><span class="tab-pixel-icon" aria-hidden="true"><svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M6 3v10M10 3v10M3 6h10M3 10h10" /></svg></span><span>Lantai kantor</span></button></div>
+          <div
+            v-for="taskId in openTaskIds"
+            :key="taskId"
+            class="editor-tab"
+            :class="{ 'editor-tab-active': activeEditorId === taskId }"
+          >
+            <button class="editor-tab-main" role="tab" :aria-selected="activeEditorId === taskId" type="button" @click="selectTask(taskId)">
+              <span class="tab-task-mark" :class="`task-mark-${tasks.find((task) => task.id === taskId)?.status ?? 'pending'}`" />
+              <span>{{ tasks.find((task) => task.id === taskId)?.instruction.slice(0, 24) ?? `Tugas #${taskId}` }}{{ (tasks.find((task) => task.id === taskId)?.instruction.length ?? 0) > 24 ? '…' : '' }}</span>
+            </button>
+            <button class="tab-close" :aria-label="`Tutup tugas ${taskId}`" type="button" @click="closeTaskTab(taskId)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg></button>
+          </div>
+          <span class="editor-tabs-spacer" />
+          <button class="icon-button" type="button" title="Tugas baru (Ctrl+N)" aria-label="Buat task baru" @click="startNewTask"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg></button>
+        </div>
+
+        <div class="editor-content">
+          <template v-if="activeEditorId === 'office'">
+            <div class="editor-heading">
+              <div><p class="editor-breadcrumb">RUANG KERJA <span>/</span> KANTOR</p><h1>Kantor visual</h1><p>Pantau aktivitas tim agent secara langsung.</p></div>
+              <span class="editor-live-state" :class="{ 'editor-live-offline': !isReady }"><i />{{ isReady ? 'AKTIF' : 'OFFLINE' }}</span>
+            </div>
+            <OfficeScene
+              :agents="agents"
+              :task="selectedTask"
+              :activities="activities"
+              :selected-agent-name="selectedAgentName"
+              @select-agent="selectAgent"
+            />
+            <div class="office-editor-foot">
+              <span><i class="scene-status-dot" />{{ selectedTask ? activeTaskLabel : 'Belum ada tugas dipilih' }}</span>
+              <span>{{ agents.filter((agent) => ['thinking', 'working', 'waiting', 'waiting_approval'].includes(agent.status)).length }} agent aktif</span>
+            </div>
+            <div v-if="activeAgent" class="agent-focus-strip">
+              <span class="agent-focus-mark">{{ activeAgent.display_name.slice(0, 1) }}</span>
+              <div><strong>{{ activeAgent.display_name }}</strong><small>{{ activeAgent.role }} · {{ activeAgent.status }}</small></div>
+              <button v-if="selectedTask" type="button" @click="editorTab = 'steps'; activeEditorId = selectedTask.id">Lihat aktivitas tugas</button>
+            </div>
+          </template>
+          <template v-else>
+            <div class="task-editor-title">
+              <div><p class="editor-breadcrumb">TASKS <span>/</span> TASK #{{ activeTask?.id ?? activeEditorId }}</p><h1>{{ activeTask?.instruction ?? 'Loading task...' }}</h1></div>
+              <span v-if="activeTask" class="task-editor-status" :class="`task-status-${activeTask.status}`"><i />{{ activeTask.status.replaceAll('_', ' ') }}</span>
+            </div>
+            <TasksTaskDetails
+              :task="activeTask"
+              :activities="activeTask ? activities : []"
+              :loading="false"
+              :active-tab="editorTab"
+              :selected-agent-name="selectedAgentName"
+              @update:active-tab="editorTab = $event"
+              @select-agent="selectedAgentName = $event"
+            />
+          </template>
+        </div>
+
+        <section class="bottom-panel" :class="{ 'bottom-panel-closed': !bottomOpen }" aria-label="Diagnostics panel">
+          <div class="bottom-panel-heading">
+            <div class="bottom-tabs" role="tablist">
+              <button v-for="tab in [
+                  { id: 'problems', label: 'MASALAH', count: problemCount },
+                  { id: 'output', label: 'AKTIVITAS', count: 0 },
+                  { id: 'terminal', label: 'STATUS', count: 0 },
+              ] as const" :key="tab.id" type="button" role="tab" :aria-selected="bottomTab === tab.id" :class="{ 'bottom-tab-active': bottomTab === tab.id }" @click="bottomTab = tab.id; bottomOpen = true">
+                {{ tab.label }}<span v-if="tab.count" class="problem-count">{{ tab.count }}</span>
+              </button></div>
+            <button class="bottom-collapse" type="button" :title="bottomOpen ? 'Tutup panel (Ctrl+J)' : 'Buka panel (Ctrl+J)'" :aria-label="bottomOpen ? 'Tutup panel bawah' : 'Buka panel bawah'" @click="bottomOpen = !bottomOpen"><svg viewBox="0 0 16 16" :class="{ 'icon-flipped': !bottomOpen }" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg></button>
+          </div>
+          <div v-if="bottomOpen" class="bottom-panel-content">
+            <template v-if="bottomTab === 'problems'">
+              <div v-if="!problemCount" class="diagnostic-empty">Tidak ada masalah terdeteksi</div>
+              <button v-if="health && !health.gemini_configured" class="diagnostic-row diagnostic-warning" type="button" @click="activityView = 'office'"><span>!</span><span>Gemini belum dikonfigurasi</span><small>Isi GEMINI_API_KEY dan GEMINI_MODEL di backend/.env</small></button>
+              <button v-for="task in tasks.filter((item) => item.status === 'failed')" :key="task.id" class="diagnostic-row diagnostic-error" type="button" @click="selectTask(task.id)"><span>×</span><span>Tugas #{{ task.id }} gagal</span><small>{{ task.error_message ?? task.instruction }}</small></button>
+              <div v-if="errorMessage" class="diagnostic-row diagnostic-error"><span>×</span><span>Koneksi workspace</span><small>{{ errorMessage }}</small></div>
+            </template>
+            <template v-else-if="bottomTab === 'output'">
+              <p v-if="!outputActivities.length" class="diagnostic-empty">Belum ada aktivitas untuk tugas yang dipilih.</p>
+              <button v-for="activity in outputActivities" :key="activity.id" class="output-row" type="button" @click="selectAgent(activity.agent_name)">
+                <time>{{ new Date(activity.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) }}</time>
+                <strong>{{ activity.agent_name.replaceAll('_', ' ') }}</strong><span>{{ activity.message }}</span><small>{{ activity.status }}</small>
+              </button>
+            </template>
+            <pre v-else class="readonly-terminal">{{ terminalLines.join('\n') }}</pre>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <footer class="ide-statusbar">
+      <div class="statusbar-left"><span class="statusbar-connection"><i />{{ connectionLabel }}</span><span>NF OFFICE</span><span>UTF-8</span></div>
+      <div class="statusbar-right"><span>{{ health?.gemini_configured ? 'Gemini · siap' : 'Gemini · belum diatur' }}</span><span>{{ activeTaskLabel }}</span><button type="button" @click="bottomOpen = !bottomOpen">MASALAH {{ problemCount }}</button></div>
     </footer>
   </main>
 </template>

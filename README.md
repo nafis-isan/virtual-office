@@ -1,13 +1,14 @@
 # Visual Office AI
 
-Dashboard kantor virtual multi-agent lokal: Nuxt 4 + Vue 3 untuk UI kantor 2D bergaya pixel-art, FastAPI untuk API/orchestrator, MySQL untuk penyimpanan dan indeks RAG, serta Gemini untuk generasi dan embedding.
+Workspace multi-agent lokal dengan antarmuka IDE gelap: Nuxt 4 + Vue 3 untuk sidebar dan tab task, scene kantor 2D pixel-art, FastAPI untuk API/orchestrator, MySQL untuk penyimpanan dan indeks RAG, serta Gemini untuk generasi agent dan embedding RAG.
 
 ## Prasyarat
 
 - Node.js 20 atau lebih baru
 - Python 3.10 atau lebih baru
 - MySQL 8 yang berjalan lokal
-- Gemini API key dan nama model yang tersedia, jika ingin menjalankan alur AI
+- Gemini API key dan nama model generasi yang tersedia, jika ingin menjalankan alur agent
+- Akses Gemini ke model embedding, jika ingin menggunakan RAG
 
 ## Versi yang diverifikasi
 
@@ -49,7 +50,7 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Isi `DATABASE_URL` pada `backend/.env`. Isi `GEMINI_API_KEY` dan `GEMINI_MODEL` dengan kredensial/model yang sudah diverifikasi di Google AI Studio. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
+Isi `DATABASE_URL`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` pada `backend/.env` menggunakan model yang tersedia untuk akun Anda. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
 RAG memakai `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` secara default; model embedding juga memerlukan akses Gemini API.
 
 Jalankan migrasi dan server:
@@ -83,13 +84,16 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 ## Yang tersedia pada MVP ini
 
 - Scene kantor 2D pixel-art dengan empat karakter agent interaktif, workstation berlabel, ruang kolaborasi, dan rak arsip RAG.
+- Kerangka IDE dengan activity bar Office/Agents/Tasks/Knowledge, sidebar yang dapat dicari, tab editor untuk kantor dan beberapa task, serta status bar provider/backend.
+- Dokumen task dengan tab Overview, Agent Steps, Output, dan Sources; klik agent untuk membuka aktivitas dan langkahnya.
+- Panel bawah Problems, Output, dan Terminal baca-saja. Shortcut: `Ctrl+N` task baru, `Ctrl+B` sidebar, `Ctrl+J` panel bawah, `Ctrl+K` pencarian.
 - Denah menyorot agent serta langkah dari task terpilih, menampilkan pembaruan aktivitas di samping karakter, dan menggerakkan agent aktif ke area kolaborasi berdasarkan status backend.
 - Panel status agent, daftar riwayat task, aktivitas, langkah, dan hasil.
 - Chat membuat task melalui REST API; dashboard melakukan polling status dari backend.
 - Project Manager menyusun rencana JSON tervalidasi, lalu specialist bekerja berurutan dan Project Manager merangkum hasil.
 - Pustaka RAG menerima dokumen PDF, TXT, MD, dan DOCX sampai 5 MB; teks dipecah menjadi potongan dan embedding Gemini disimpan di MySQL. Saat task dibuat, lima potongan terdekat (jika relevan) dipakai sebagai konteks dan sumber dicantumkan di ringkasan.
 - Dokumen diunggah melalui UI dan dapat dihapus dari pustaka; jalankan `alembic upgrade head` untuk membuat tabel knowledge.
-- Isi teks dikirim ke Gemini API untuk embedding dan sebagai konteks jawaban; file asli tidak disimpan. Jangan unggah data sensitif yang tidak boleh diproses oleh layanan Gemini.
+- Prompt, konteks jawaban, dan embedding dokumen diproses oleh Gemini API. File asli tidak disimpan. Jangan unggah data sensitif yang tidak boleh diproses oleh layanan Gemini.
 - Task, langkah, aktivitas, pesan, artefak teks, agent, dan approval disimpan melalui model SQLAlchemy dan migrasi Alembic MySQL.
 - Gemini hanya dipanggil backend. Status API key tidak membuka nilainya ke frontend.
 - Penanganan error Gemini/database ditampilkan sebagai pesan aman; task gagal tidak ditandai selesai.
@@ -98,7 +102,7 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 
 Programmer hanya menghasilkan draft dan artefak teks. MVP ini **tidak** menulis, menimpa, atau menghapus file, menjalankan shell, menginstal paket, melakukan pencarian web, maupun membatalkan task. Approval dicatat sebagai konsep API, tetapi tidak memberi izin untuk menjalankan tindakan sistem. Jangan mengaktifkan tindakan tersebut tanpa sandbox, validasi workspace, dan kebijakan approval yang ditinjau.
 
-Agent memerlukan MySQL dan konfigurasi `GEMINI_API_KEY` serta `GEMINI_MODEL` agar tugas dapat diproses. Unggah dan retrieval dokumen juga memerlukan akses ke model `GEMINI_EMBEDDING_MODEL`. Nama model dan ketersediaan kuota bergantung pada konfigurasi akun; aplikasi tidak mengasumsikan nama model atau kuota gratis tanpa batas.
+Agent memerlukan MySQL dan konfigurasi `GEMINI_API_KEY` serta `GEMINI_MODEL` agar tugas dapat diproses. Unggah dan retrieval dokumen juga memerlukan akses ke model `GEMINI_EMBEDDING_MODEL`. Nama model dan ketersediaan kuota bergantung pada konfigurasi akun; aplikasi tidak mengasumsikan kuota gratis tanpa batas.
 
 ## Pemeriksaan
 

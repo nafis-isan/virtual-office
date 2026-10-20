@@ -18,7 +18,7 @@ function submit() {
         <p class="eyebrow">MULAI PROYEK</p>
         <h2>Instruksi untuk tim</h2>
       </div>
-      <span class="chat-spark">✳</span>
+      <span class="chat-mode-label">TIM AI</span>
     </div>
     <p class="muted chat-hint">
       Project Manager akan menyusun langkah dan mendelegasikan pekerjaan kepada specialist.
@@ -38,7 +38,7 @@ function submit() {
         <span>{{ instruction.length }}/4000</span>
         <button class="primary-button" type="submit" :disabled="disabled || sending || !instruction.trim()">
           <span>{{ sending ? 'Mengirim...' : 'Kirim instruksi' }}</span>
-          <span aria-hidden="true">↗</span>
+          <svg class="submit-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M8 3l5 5-5 5" /></svg>
         </button>
       </div>
     </form>

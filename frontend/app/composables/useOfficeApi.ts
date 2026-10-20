@@ -39,9 +39,11 @@ export function useOfficeApi() {
   }
 
   async function getHealth() {
-    return request<{ status: string; database: string; gemini_configured: boolean }>(
-      '/api/health',
-    )
+    return request<{
+      status: string
+      database: string
+      gemini_configured: boolean
+    }>('/api/health')
   }
 
   async function getKnowledgeDocuments() {
