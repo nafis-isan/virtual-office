@@ -1,7 +1,9 @@
 import io
 import json
+import logging
 import math
 import re
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -13,8 +15,11 @@ from pypdf.errors import PdfReadError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import KnowledgeChunk, KnowledgeDocument
 from app.services.gemini import embed_texts
+
+logger = logging.getLogger(__name__)
 
 MAX_FILE_BYTES = 5 * 1024 * 1024
 MAX_CHUNKS_PER_DOCUMENT = 200
@@ -23,7 +28,9 @@ CHUNK_OVERLAP = 180
 EMBEDDING_BATCH_SIZE = 32
 RETRIEVAL_LIMIT = 5
 MINIMUM_RELEVANCE = 0.25
+MINIMUM_KEYWORD_RELEVANCE = 0.2
 SUPPORTED_TYPES = {".txt", ".md", ".pdf", ".docx"}
+TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
 
 
 @dataclass
@@ -127,10 +134,18 @@ def _batches(items: Sequence[TextChunk], batch_size: int) -> list[Sequence[TextC
 async def index_upload(db: Session, upload: UploadFile) -> KnowledgeDocument:
     filename, content_type, chunks = await _read_upload(upload)
     embeddings: list[list[float]] = []
-    for batch in _batches(chunks, EMBEDDING_BATCH_SIZE):
-        embeddings.extend(
-            embed_texts([chunk.content for chunk in batch], task_type="RETRIEVAL_DOCUMENT")
-        )
+    if settings.ai_provider == "openrouter":
+        embeddings = [[] for _ in chunks]
+    else:
+        if not settings.gemini_api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Pembuatan embedding dokumen memerlukan GEMINI_API_KEY.",
+            )
+        for batch in _batches(chunks, EMBEDDING_BATCH_SIZE):
+            embeddings.extend(
+                embed_texts([chunk.content for chunk in batch], task_type="RETRIEVAL_DOCUMENT")
+            )
 
     document = KnowledgeDocument(
         filename=filename,
@@ -161,6 +176,14 @@ def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     return sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)
 
 
+def _keyword_similarity(query: str, content: str) -> float:
+    query_terms = set(TOKEN_PATTERN.findall(query.casefold()))
+    if not query_terms:
+        return 0.0
+    content_terms = set(TOKEN_PATTERN.findall(content.casefold()))
+    return len(query_terms & content_terms) / len(query_terms)
+
+
 def retrieve_context(db: Session, query: str) -> list[RetrievedChunk]:
     stored_chunks = db.execute(
         select(KnowledgeChunk, KnowledgeDocument.filename)
@@ -169,20 +192,40 @@ def retrieve_context(db: Session, query: str) -> list[RetrievedChunk]:
     if not stored_chunks:
         return []
 
-    query_vector = embed_texts([query], task_type="RETRIEVAL_QUERY")[0]
-    scored = [
-        RetrievedChunk(
-            filename=filename,
-            page_number=chunk.page_number,
-            content=chunk.content,
-            score=_cosine_similarity(query_vector, json.loads(chunk.embedding)),
+    if settings.ai_provider == "openrouter":
+        logger.warning(
+            "Using local keyword retrieval for OpenRouter tasks; Gemini is not called"
         )
-        for chunk, filename in stored_chunks
-    ]
+        scored = [
+            RetrievedChunk(
+                filename=filename,
+                page_number=chunk.page_number,
+                content=chunk.content,
+                score=_keyword_similarity(query, chunk.content),
+            )
+            for chunk, filename in stored_chunks
+        ]
+        minimum_relevance = MINIMUM_KEYWORD_RELEVANCE
+    else:
+        if not settings.gemini_api_key:
+            raise RuntimeError(
+                "Pencarian dokumen memerlukan GEMINI_API_KEY saat AI_PROVIDER=gemini."
+            )
+        query_vector = embed_texts([query], task_type="RETRIEVAL_QUERY")[0]
+        scored = [
+            RetrievedChunk(
+                filename=filename,
+                page_number=chunk.page_number,
+                content=chunk.content,
+                score=_cosine_similarity(query_vector, json.loads(chunk.embedding)),
+            )
+            for chunk, filename in stored_chunks
+        ]
+        minimum_relevance = MINIMUM_RELEVANCE
     return [
         item
         for item in sorted(scored, key=lambda item: item.score, reverse=True)
-        if item.score >= MINIMUM_RELEVANCE
+        if item.score >= minimum_relevance
     ][:RETRIEVAL_LIMIT]
 
 

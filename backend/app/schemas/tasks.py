@@ -48,6 +48,7 @@ class TaskRead(BaseModel):
     id: int
     instruction: str
     status: str
+    archived: bool
     summary: str | None
     error_message: str | None
     created_at: datetime
@@ -86,8 +87,30 @@ class ArtifactRead(BaseModel):
     id: int
     step_id: int
     name: str
+    kind: str
     content: str
     created_at: datetime
+
+
+class ArtifactSaveRequest(BaseModel):
+    relative_path: str = Field(min_length=1, max_length=200)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class TaskArchiveRequest(BaseModel):
+    archived: bool
+
+
+class ArtifactSaved(BaseModel):
+    path: str
+
+
+class ArtifactComparison(BaseModel):
+    path: str
+    exists: bool
+    current_content: str | None
+    current_sha256: str | None
 
 
 class ApprovalDecision(BaseModel):

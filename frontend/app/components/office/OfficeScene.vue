@@ -12,8 +12,8 @@ const emit = defineEmits<{ selectAgent: [agentName: string] }>()
 const selectedIndex = ref(0)
 const stations = [
   { agentName: 'project_manager', department: 'REVIEW', x: 132, y: 126, home: [227, 260], work: [227, 244], handoff: [414, 462], color: '#54765d' },
-  { agentName: 'researcher', department: 'RISET', x: 668, y: 126, home: [773, 260], work: [773, 244], handoff: [586, 462], color: '#657d8a' },
-  { agentName: 'designer', department: 'PENULISAN', x: 132, y: 406, home: [227, 536], work: [227, 514], handoff: [460, 474], color: '#b66b4d' },
+  { agentName: 'researcher', department: 'RESEARCH', x: 668, y: 126, home: [773, 260], work: [773, 244], handoff: [586, 462], color: '#657d8a' },
+  { agentName: 'designer', department: 'DESIGN', x: 132, y: 406, home: [227, 536], work: [227, 514], handoff: [460, 474], color: '#b66b4d' },
   { agentName: 'programmer', department: 'CODING', x: 668, y: 406, home: [773, 536], work: [773, 514], handoff: [540, 474], color: '#8c7953' },
 ]
 
@@ -28,14 +28,36 @@ const statusLabels: Record<AgentStatus, string> = {
   offline: 'Tidak terhubung',
 }
 
-const taskIsActive = computed(() => ['thinking', 'working'].includes(props.task?.status ?? ''))
+const taskIsActive = computed(() =>
+  ['thinking', 'working', 'waiting', 'waiting_approval'].includes(props.task?.status ?? ''),
+)
 const activeStep = computed(() =>
-  [...(props.task?.steps ?? [])].reverse().find((step) => ['working', 'thinking'].includes(step.status)),
+  [...(props.task?.steps ?? [])].reverse().find((step) =>
+    ['working', 'thinking', 'waiting', 'waiting_approval'].includes(step.status),
+  ),
 )
 const activeActivity = computed(() =>
-  [...props.activities].reverse().find((activity) => ['thinking', 'working'].includes(activity.status)),
+  [...props.activities].reverse().find((activity) =>
+    ['thinking', 'working', 'waiting', 'waiting_approval'].includes(activity.status),
+  ),
 )
 const latestActivity = computed(() => props.activities.at(-1))
+const handoffs = computed(() => {
+  const transitions = props.activities.flatMap((activity, index) => {
+    if (activity.status !== 'completed') return []
+    const receiver = props.activities.slice(index + 1).find((nextActivity) =>
+      ['thinking', 'working'].includes(nextActivity.status),
+    )
+    if (!receiver || receiver.agent_name === activity.agent_name) return []
+    return [{
+      id: `${activity.id}-${receiver.id}`,
+      sender: activity.agent_name,
+      receiver: receiver.agent_name,
+      message: receiver.message,
+    }]
+  })
+  return transitions.slice(-3).reverse()
+})
 const spotlightAgentName = computed(() => {
   if (taskIsActive.value) {
     return activeStep.value?.agent_name ?? activeActivity.value?.agent_name ?? 'project_manager'
@@ -57,21 +79,34 @@ const characters = computed(() =>
     const agentActivity = [...props.activities].reverse().find((activity) => activity.agent_name === agent?.name)
     const focused = !!agent && agent.name === spotlightAgentName.value
     const stepIsActive = !!latestStep && ['thinking', 'working'].includes(latestStep.status)
-    const active =
-      ['thinking', 'working', 'waiting', 'waiting_approval'].includes(agent?.status ?? '') ||
-      (taskIsActive.value && stepIsActive)
+    const activityIsActive =
+      taskIsActive.value &&
+      agentActivity?.agent_name === agent?.name &&
+      ['thinking', 'working', 'waiting', 'waiting_approval'].includes(agentActivity?.status ?? '')
+    const active = taskIsActive.value ? stepIsActive || activityIsActive : false
+    const atWorkstation =
+      active ||
+      (taskIsActive.value &&
+        !!latestStep &&
+        ['waiting', 'waiting_approval'].includes(latestStep.status) &&
+        activeStep.value?.agent_name === agent?.name)
     const delivering = props.task?.status === 'completed' && latestStep?.status === 'completed'
-    const status: AgentStatus | undefined =
-      delivering
-        ? 'completed'
-        : taskIsActive.value && latestStep && ['thinking', 'working'].includes(latestStep.status)
-          ? latestStep.status as AgentStatus
-          : agent?.status
-    const position = delivering ? station.handoff : active ? station.work : station.home
+    const taskStepStatus = latestStep?.status
+    const status: AgentStatus | undefined = latestStep
+      ? stepAgentStatus(taskStepStatus ?? '')
+      : props.task
+        ? taskIsActive.value && activityIsActive
+          ? stepAgentStatus(agentActivity?.status ?? '')
+          : props.task.status === 'failed' && focused
+            ? 'failed'
+            : 'idle'
+        : agent?.status
+    const position = delivering ? station.handoff : atWorkstation ? station.work : station.home
 
     return {
       agent,
       active,
+      atWorkstation,
       delivering,
       focused,
       status,
@@ -80,6 +115,7 @@ const characters = computed(() =>
         : undefined,
       taskTitle: latestStep?.title,
       taskOutput: latestStep?.output,
+      taskStepStatus,
       department: station.department,
       color: station.color,
       x: position[0],
@@ -110,6 +146,27 @@ function statusColor(status: AgentStatus | undefined) {
   if (status === 'failed') return '#d86f5a'
   if (status === 'completed') return '#91a29a'
   return '#52666d'
+}
+
+function stepStatusLabel(status: string) {
+  if (status === 'pending') return 'menunggu'
+  return status.replaceAll('_', ' ')
+}
+
+function stepAgentStatus(status: string): AgentStatus {
+  switch (status) {
+    case 'pending':
+    case 'waiting':
+      return 'waiting'
+    case 'thinking':
+    case 'working':
+    case 'waiting_approval':
+    case 'completed':
+    case 'failed':
+      return status
+    default:
+      return 'offline'
+  }
 }
 
 function shortName(name: string | undefined, index: number) {
@@ -233,7 +290,10 @@ function selectAgent(index: number) {
         </g>
         <rect x="423" y="424" width="154" height="14" fill="#26383b" />
         <text x="500" y="434" text-anchor="middle" fill="#f1d39b" font-size="7" font-family="monospace" letter-spacing="1.1">
-          {{ task?.status === 'completed' ? 'HASIL TUGAS' : 'MEJA KOLABORASI' }}
+          {{ task?.status === 'completed' ? 'HASIL TUGAS' : 'KOLABORASI' }}
+        </text>
+        <text x="500" y="455" text-anchor="middle" fill="#f5e7c8" font-size="7" font-family="monospace" letter-spacing=".8">
+          RUANG KOLABORASI
         </text>
 
         <g aria-label="Papan status tugas">
@@ -390,11 +450,12 @@ function selectAgent(index: number) {
           NF OFFICE · VISUAL WORKSPACE
         </text>
       </svg>
-      <div class="scene-legend" aria-hidden="true">
+      <div class="scene-legend" aria-label="Keterangan status agent">
         <span><i class="legend-active" /> Aktif</span>
         <span><i class="legend-idle" /> Siap</span>
+        <span><i class="legend-waiting" /> Menunggu</span>
+        <span><i class="legend-alert" /> Gagal</span>
         <span><i class="legend-table" /> Hasil</span>
-        <span><i class="legend-archive" /> Ruang RAG</span>
       </div>
     </div>
     <div v-if="selectedCharacter" class="scene-inspector" aria-live="polite">
@@ -411,7 +472,41 @@ function selectAgent(index: number) {
         <i :style="{ '--status-color': statusColor(selectedCharacter.status) }" />
         {{ statusLabels[selectedCharacter.status ?? 'offline'] }}
       </span>
-      <span class="inspector-hint">{{ selectedCharacter.delivering ? 'Mengirim hasil ke meja utama' : selectedCharacter.active ? 'Bekerja di mejanya' : 'Pilih agent atau ruang' }}</span>
+      <span class="inspector-hint">
+        {{ selectedCharacter.delivering
+          ? 'Mengirim hasil ke meja utama'
+          : (selectedCharacter.status === 'waiting' || selectedCharacter.status === 'waiting_approval') && selectedCharacter.atWorkstation
+            ? 'Menunggu di ruang kerja'
+            : selectedCharacter.status === 'waiting'
+              ? 'Menunggu giliran'
+            : selectedCharacter.active
+              ? 'Bekerja di mejanya'
+              : 'Pilih agent atau ruang' }}
+      </span>
     </div>
+    <section v-if="task" class="office-task-flow" aria-label="Urutan langkah tugas">
+      <div class="office-task-flow-heading">
+        <strong>ALUR TUGAS</strong>
+        <span>{{ task.steps.filter((step) => step.status === 'completed').length }}/{{ task.steps.length }} langkah selesai</span>
+      </div>
+      <ol v-if="task.steps.length" class="office-task-steps">
+        <li v-for="step in task.steps" :key="step.id" :class="`office-step-${step.status}`">
+          <span class="office-step-marker" :aria-label="step.status.replaceAll('_', ' ')">
+            {{ step.status === 'completed' ? '✓' : step.status === 'failed' ? '!' : step.position }}
+          </span>
+          <span class="office-step-copy">
+            <strong>{{ step.title }}</strong>
+            <small>{{ shortName(step.agent_name, 0) }} · {{ stepStatusLabel(step.status) }}</small>
+          </span>
+        </li>
+      </ol>
+      <p v-else class="office-flow-empty">Langkah agent akan muncul saat tugas dimulai.</p>
+      <div v-if="handoffs.length" class="office-handoffs" aria-label="Serah-terima agent yang tercatat">
+        <strong>SERAH-TERIMA TERCATAT</strong>
+        <p v-for="handoff in handoffs" :key="handoff.id">
+          {{ shortName(handoff.sender, 0) }} → {{ shortName(handoff.receiver, 0) }} · {{ compactMessage(handoff.message) }}
+        </p>
+      </div>
+    </section>
   </div>
 </template>

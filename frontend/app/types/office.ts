@@ -36,10 +36,31 @@ export interface Task {
   id: number
   instruction: string
   status: string
+  archived: boolean
   summary: string | null
   error_message: string | null
   created_at: string
   updated_at: string
+}
+
+export interface TaskArtifact {
+  id: number
+  step_id: number
+  name: string
+  kind: 'output' | 'file'
+  content: string
+  created_at: string
+}
+
+export interface ArtifactComparison {
+  path: string
+  exists: boolean
+  current_content: string | null
+  current_sha256: string | null
+}
+
+export interface ArtifactSaved {
+  path: string
 }
 
 export interface TaskDetail extends Task {

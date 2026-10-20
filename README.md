@@ -7,7 +7,7 @@ Workspace multi-agent lokal dengan antarmuka IDE gelap: Nuxt 4 + Vue 3 untuk sid
 - Node.js 20 atau lebih baru
 - Python 3.10 atau lebih baru
 - MySQL 8 yang berjalan lokal
-- Gemini API key dan nama model generasi yang tersedia, jika ingin menjalankan alur agent
+- API key dan model Gemini atau OpenRouter, jika ingin menjalankan alur agent
 - Akses Gemini ke model embedding, jika ingin menggunakan RAG
 
 ## Versi yang diverifikasi
@@ -50,8 +50,8 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Isi `DATABASE_URL`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` pada `backend/.env` menggunakan model yang tersedia untuk akun Anda. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
-RAG memakai `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` secara default; model embedding juga memerlukan akses Gemini API.
+Isi `DATABASE_URL` serta konfigurasi provider di `backend/.env`. Gunakan `AI_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, dan `OPENROUTER_MODEL` untuk generasi teks melalui OpenRouter; model bawaan adalah `minimax/minimax-m3.1-flash:free` dengan reasoning aktif (`OPENROUTER_REASONING_ENABLED=true`). Atau gunakan `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` untuk Gemini. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
+Pada mode OpenRouter, dokumen RAG memakai pencocokan kata kunci lokal. Pada mode Gemini, `GEMINI_API_KEY` dan `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` dipakai untuk embedding semantik.
 
 Jalankan migrasi dan server:
 
@@ -91,18 +91,22 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 - Panel status agent, daftar riwayat task, aktivitas, langkah, dan hasil.
 - Chat membuat task melalui REST API; dashboard melakukan polling status dari backend.
 - Project Manager menyusun rencana JSON tervalidasi, lalu specialist bekerja berurutan dan Project Manager merangkum hasil.
-- Pustaka RAG menerima dokumen PDF, TXT, MD, dan DOCX sampai 5 MB; teks dipecah menjadi potongan dan embedding Gemini disimpan di MySQL. Saat task dibuat, lima potongan terdekat (jika relevan) dipakai sebagai konteks dan sumber dicantumkan di ringkasan.
+- Agent dapat menghasilkan file kode atau Markdown dengan blok kode beratribut `path=...`; tab Output menyediakan pratinjau, unduh per file atau seluruh proyek sebagai ZIP (path folder dipertahankan), dan perbandingan dengan file yang ada. Simpan hanya setelah konfirmasi dan hanya ke dalam `WORKSPACE_ROOT`.
+- Task gagal dapat dicoba ulang sebagai task baru; task aktif dapat dibatalkan secara kooperatif; task selesai, gagal, atau dibatalkan dapat diarsipkan dan dipulihkan.
+- Pustaka RAG menerima dokumen PDF, TXT, MD, dan DOCX sampai 5 MB. Dengan `AI_PROVIDER=openrouter`, retrieval memakai pencocokan kata kunci lokal tanpa memanggil Gemini. Dengan `AI_PROVIDER=gemini`, embedding Gemini disimpan di MySQL dan lima potongan relevan dipakai sebagai konteks; mode embedding memerlukan `GEMINI_API_KEY`.
 - Dokumen diunggah melalui UI dan dapat dihapus dari pustaka; jalankan `alembic upgrade head` untuk membuat tabel knowledge.
-- Prompt, konteks jawaban, dan embedding dokumen diproses oleh Gemini API. File asli tidak disimpan. Jangan unggah data sensitif yang tidak boleh diproses oleh layanan Gemini.
+- Prompt generasi agent dan konteks jawaban dikirim ke provider pada `AI_PROVIDER`. Mode OpenRouter memproses dokumen RAG lokal; mode Gemini mengirim teks dokumen ke Gemini API untuk embedding. File asli tidak disimpan. Jangan unggah data sensitif yang tidak boleh diproses oleh layanan pihak ketiga tersebut.
 - Task, langkah, aktivitas, pesan, artefak teks, agent, dan approval disimpan melalui model SQLAlchemy dan migrasi Alembic MySQL.
-- Gemini hanya dipanggil backend. Status API key tidak membuka nilainya ke frontend.
-- Penanganan error Gemini/database ditampilkan sebagai pesan aman; task gagal tidak ditandai selesai.
+- Provider AI hanya dipanggil backend. Status konfigurasi tidak membuka nilai API key ke frontend.
+- Penanganan error provider AI/database ditampilkan sebagai pesan aman; task gagal tidak ditandai selesai.
 
-## Batas keamanan MVP
+## Batas keamanan
 
-Programmer hanya menghasilkan draft dan artefak teks. MVP ini **tidak** menulis, menimpa, atau menghapus file, menjalankan shell, menginstal paket, melakukan pencarian web, maupun membatalkan task. Approval dicatat sebagai konsep API, tetapi tidak memberi izin untuk menjalankan tindakan sistem. Jangan mengaktifkan tindakan tersebut tanpa sandbox, validasi workspace, dan kebijakan approval yang ditinjau.
+Agent hanya menghasilkan draft dan artefak; agent tidak punya akses filesystem atau shell. File baru ditulis hanya setelah pengguna memilih lokasi relatif dan mengonfirmasi. Backend membatasi baca/tulis file ke `WORKSPACE_ROOT`, menolak path traversal, symbolic link keluar workspace, file kredensial umum, dan penimpaan tanpa konfirmasi kedua. Membatalkan task bersifat kooperatif: panggilan Gemini yang sedang berlangsung tidak dapat dihentikan, tetapi hasilnya tidak akan diterapkan setelah pembatalan terdeteksi.
 
-Agent memerlukan MySQL dan konfigurasi `GEMINI_API_KEY` serta `GEMINI_MODEL` agar tugas dapat diproses. Unggah dan retrieval dokumen juga memerlukan akses ke model `GEMINI_EMBEDDING_MODEL`. Nama model dan ketersediaan kuota bergantung pada konfigurasi akun; aplikasi tidak mengasumsikan kuota gratis tanpa batas.
+Aplikasi ini tidak menjalankan shell, menginstal paket, menghapus file, atau melakukan pencarian web. Approval dicatat sebagai konsep API dan tidak memberi izin menjalankan tindakan sistem. Tinjau perubahan file sebelum menyimpannya; jangan mengarahkan `WORKSPACE_ROOT` ke folder yang berisi data sensitif.
+
+Agent memerlukan MySQL dan konfigurasi API key serta model untuk provider yang dipilih. Mode OpenRouter tidak memerlukan Gemini; mode Gemini dan retrieval semantik dokumennya memerlukan `GEMINI_API_KEY` serta model `GEMINI_EMBEDDING_MODEL`. Nama model dan ketersediaan kuota bergantung pada konfigurasi akun; aplikasi tidak mengasumsikan kuota gratis tanpa batas.
 
 ## Pemeriksaan
 

@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 from collections.abc import Sequence
@@ -20,6 +21,12 @@ class GeminiRequestError(RuntimeError):
 
 
 def generate_text(prompt: str, *, json_response: bool = False) -> str:
+    if settings.ai_provider == "openrouter":
+        return _generate_text_openrouter(prompt, json_response=json_response)
+    if settings.ai_provider != "gemini":
+        raise GeminiUnavailableError(
+            "AI_PROVIDER tidak dikenal. Gunakan 'gemini' atau 'openrouter' di backend/.env."
+        )
     if not settings.gemini_api_key or not settings.gemini_model:
         raise GeminiUnavailableError(
             "Gemini belum dikonfigurasi. Isi GEMINI_API_KEY dan GEMINI_MODEL di backend/.env."
@@ -68,6 +75,125 @@ def generate_text(prompt: str, *, json_response: bool = False) -> str:
     if not result or not result.strip():
         raise GeminiRequestError("Gemini mengembalikan respons kosong. Coba ulangi instruksi.")
     return result.strip()[: settings.max_output_length]
+
+
+def _generate_text_openrouter(prompt: str, *, json_response: bool) -> str:
+    if not settings.openrouter_api_key or not settings.openrouter_model:
+        raise GeminiUnavailableError(
+            "OpenRouter belum dikonfigurasi. Isi OPENROUTER_API_KEY dan "
+            "OPENROUTER_MODEL di backend/.env."
+        )
+
+    headers = {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "Content-Type": "application/json",
+        "X-Title": "NF Office",
+        "HTTP-Referer": "http://localhost:3000",
+    }
+    payload: dict[str, object] = {
+        "model": settings.openrouter_model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 8192,
+        "reasoning": {"enabled": settings.openrouter_reasoning_enabled},
+    }
+    if json_response:
+        payload["response_format"] = {"type": "json_object"}
+
+    def request_completion(request_payload: dict[str, object]) -> dict:
+        try:
+            response = httpx.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=request_payload,
+                timeout=120.0,
+            )
+        except (httpx.HTTPError, TimeoutError, OSError) as exc:
+            logger.warning(
+                "OpenRouter connection failed: model=%s error=%s",
+                settings.openrouter_model,
+                type(exc).__name__,
+            )
+            raise GeminiRequestError(
+                "Koneksi ke OpenRouter gagal atau melewati batas waktu 120 detik. "
+                "Periksa koneksi internet dan coba lagi."
+            ) from exc
+
+        if response.is_error:
+            status = response.status_code
+            logger.warning(
+                "OpenRouter request failed: model=%s status=%s",
+                settings.openrouter_model,
+                status,
+            )
+            if status in (401, 403):
+                message = "OpenRouter menolak akses. Periksa OPENROUTER_API_KEY."
+            elif status == 402:
+                message = "Saldo atau kredit OpenRouter tidak mencukupi."
+            elif status == 404:
+                message = (
+                    f"Model OpenRouter '{settings.openrouter_model}' tidak ditemukan. "
+                    "Periksa OPENROUTER_MODEL di backend/.env."
+                )
+            elif status == 429:
+                message = "Batas permintaan OpenRouter tercapai. Periksa limit akun lalu coba lagi."
+            else:
+                message = f"OpenRouter gagal merespons (HTTP {status}). Coba lagi nanti."
+            raise GeminiRequestError(message)
+
+        try:
+            return response.json()
+        except json.JSONDecodeError as exc:
+            raise GeminiRequestError("OpenRouter mengembalikan respons yang tidak valid.") from exc
+
+    def get_assistant_message(data: dict) -> dict:
+        try:
+            message = data["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise GeminiRequestError("OpenRouter mengembalikan respons yang tidak valid.") from exc
+        if not isinstance(message, dict):
+            raise GeminiRequestError("OpenRouter mengembalikan respons yang tidak valid.")
+        return message
+
+    def get_text_content(content: object) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return "".join(
+                part["text"]
+                for part in content
+                if isinstance(part, dict)
+                and part.get("type") == "text"
+                and isinstance(part.get("text"), str)
+            ).strip()
+        return ""
+
+    message = get_assistant_message(request_completion(payload))
+    result = get_text_content(message.get("content"))
+    reasoning_details = message.get("reasoning_details")
+    reasoning = message.get("reasoning")
+    if not result and (reasoning_details or reasoning):
+        assistant_message = {"role": "assistant", "content": message.get("content")}
+        if reasoning_details:
+            assistant_message["reasoning_details"] = reasoning_details
+        if reasoning:
+            assistant_message["reasoning"] = reasoning
+        payload["messages"] = [
+            {"role": "user", "content": prompt},
+            assistant_message,
+            {
+                "role": "user",
+                "content": (
+                    "Lanjutkan dari respons sebelumnya dan berikan jawaban akhir. "
+                    "Jangan tampilkan proses reasoning. Ikuti format output yang diminta."
+                ),
+            },
+        ]
+        message = get_assistant_message(request_completion(payload))
+        result = get_text_content(message.get("content"))
+
+    if not result:
+        raise GeminiRequestError("OpenRouter mengembalikan respons kosong. Coba ulangi instruksi.")
+    return result[: settings.max_output_length]
 
 
 def embed_texts(texts: Sequence[str], *, task_type: str) -> list[list[float]]:

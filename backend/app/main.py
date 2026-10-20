@@ -33,5 +33,17 @@ def health() -> dict[str, object]:
     return {
         "status": "ok" if database == "connected" else "degraded",
         "database": database,
+        "ai_provider": settings.ai_provider,
+        "ai_configured": (
+            bool(settings.openrouter_api_key and settings.openrouter_model)
+            if settings.ai_provider == "openrouter"
+            else bool(settings.gemini_api_key and settings.gemini_model)
+        ),
         "gemini_configured": bool(settings.gemini_api_key and settings.gemini_model),
+        "gemini_embedding_configured": bool(settings.gemini_api_key),
+        "rag_mode": (
+            "keyword_local"
+            if settings.ai_provider == "openrouter"
+            else "gemini_embeddings"
+        ),
     }

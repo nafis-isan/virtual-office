@@ -24,7 +24,7 @@ function errorText(error: unknown) {
       return data.detail
     }
   }
-  return 'Permintaan dokumen gagal. Pastikan backend dan koneksi Gemini tersedia.'
+  return 'Permintaan dokumen gagal. Periksa koneksi backend dan konfigurasi provider AI.'
 }
 
 async function refreshDocuments() {
@@ -85,8 +85,8 @@ onMounted(refreshDocuments)
       <span class="knowledge-count">{{ documents.length }} FILE</span>
     </div>
     <p class="muted knowledge-hint">
-      Teks dokumen dikirim ke Gemini untuk embedding dan jawaban; hanya teks serta embedding yang disimpan.
-      Jangan unggah informasi sensitif.
+      OpenRouter memakai pencocokan kata kunci lokal; mode Gemini memakai embedding semantik.
+      File asli tidak disimpan. Jangan unggah informasi sensitif.
     </p>
     <label class="knowledge-upload">
       <input

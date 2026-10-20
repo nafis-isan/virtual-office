@@ -26,6 +26,7 @@ class Task(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="thinking", nullable=False)
+    archived: Mapped[bool] = mapped_column(default=False, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
@@ -90,6 +91,7 @@ class Artifact(Base):
     task_id: Mapped[int] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
     step_id: Mapped[int] = mapped_column(ForeignKey("task_steps.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), default="output", nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 

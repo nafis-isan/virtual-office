@@ -9,6 +9,10 @@ class Settings(BaseSettings):
         "visual_office_ai?charset=utf8mb4"
     )
     frontend_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    ai_provider: str = "gemini"
+    openrouter_api_key: str = ""
+    openrouter_model: str = "minimax/minimax-m3.1-flash:free"
+    openrouter_reasoning_enabled: bool = True
     gemini_api_key: str = ""
     gemini_model: str = ""
     gemini_embedding_model: str = "gemini-embedding-001"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Activity, Agent, Task, TaskDetail } from '~/types/office'
+import type { Activity, Agent, Task, TaskArtifact, TaskDetail } from '~/types/office'
 
 type ActivityView = 'office' | 'agents' | 'tasks' | 'knowledge'
 type EditorTab = 'overview' | 'steps' | 'output' | 'sources'
@@ -15,6 +15,7 @@ const agents = ref<Agent[]>([])
 const tasks = ref<Task[]>([])
 const selectedTask = ref<TaskDetail | null>(null)
 const activities = ref<Activity[]>([])
+const taskArtifacts = ref<TaskArtifact[]>([])
 const selectedId = ref<number | null>(null)
 const openTaskIds = ref<number[]>([])
 const activeEditorId = ref<number | 'office'>('office')
@@ -25,17 +26,24 @@ const bottomOpen = ref(true)
 const sidebarOpen = ref(true)
 const composerOpen = ref(false)
 const selectedAgentName = ref<string | null>(null)
+const showArchivedTasks = ref(false)
 const searchQuery = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
 const health = ref<{
   status: string
   database: string
+  ai_provider: string
+  ai_configured: boolean
   gemini_configured: boolean
+  gemini_embedding_configured: boolean
+  rag_mode: string
 } | null>(null)
 const loading = ref(true)
 const sending = ref(false)
 const errorMessage = ref('')
+const officeNotice = ref('')
 let pollTimer: ReturnType<typeof setInterval> | undefined
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
 
 const isReady = computed(() => health.value?.database === 'connected')
 const connectionLabel = computed(() => {
@@ -64,13 +72,17 @@ const activeTaskLabel = computed(() => {
 })
 const problemCount = computed(() => {
   const taskErrors = tasks.value.filter((task) => task.status === 'failed').length
-  const configError = health.value && !health.value.gemini_configured ? 1 : 0
+  const configError = health.value && !health.value.ai_configured ? 1 : 0
   return taskErrors + configError + (errorMessage.value ? 1 : 0)
 })
 const outputActivities = computed(() => [...activities.value].reverse().slice(0, 24))
+const activeTaskCanCancel = computed(() =>
+  !!selectedTask.value && ['thinking', 'working', 'waiting', 'waiting_approval'].includes(selectedTask.value.status),
+)
 const terminalLines = computed(() => [
   `[workspace] Backend: ${health.value?.status ?? 'menghubungkan'} · Database: ${health.value?.database ?? 'tidak diketahui'}`,
-  `[provider] Gemini: ${health.value?.gemini_configured ? 'siap' : 'belum diatur'}`,
+  `[provider] ${health.value?.ai_provider ?? 'AI'}: ${health.value?.ai_configured ? 'siap' : 'belum diatur'}`,
+  `[rag] ${health.value?.rag_mode === 'keyword_local' ? 'pencocokan kata kunci lokal' : 'Gemini embeddings'}`,
   selectedTask.value
     ? `[tugas #${selectedTask.value.id}] ${selectedTask.value.status} · ${selectedTask.value.instruction}`
     : '[tugas] Belum ada tugas yang dipilih.',
@@ -88,17 +100,42 @@ function getErrorMessage(error: unknown) {
 }
 
 async function loadTask(taskId: number) {
+  const previousTask = selectedTask.value?.id === taskId ? selectedTask.value : null
   selectedId.value = taskId
+  if (!previousTask) {
+    selectedTask.value = null
+    activities.value = []
+    taskArtifacts.value = []
+  }
   try {
-    const [detail, taskActivities] = await Promise.all([
+    const [detail, taskActivities, artifacts] = await Promise.all([
       api.getTask(taskId),
       api.getActivities(taskId),
+      api.getArtifacts(taskId),
     ])
     if (selectedId.value !== taskId) return
     selectedTask.value = detail
     activities.value = taskActivities
+    taskArtifacts.value = artifacts
+    if (
+      previousTask &&
+      ['thinking', 'working', 'waiting', 'waiting_approval'].includes(previousTask.status) &&
+      ['completed', 'failed'].includes(detail.status)
+    ) {
+      const fileCount = artifacts.filter((artifact) => artifact.kind === 'file').length
+      officeNotice.value = detail.status === 'completed'
+        ? `Tugas #${detail.id} selesai${fileCount ? ` · ${fileCount} file siap diperiksa` : ' · hasil siap diperiksa'}.`
+        : `Tugas #${detail.id} gagal: ${detail.error_message ?? detail.instruction}`
+      if (noticeTimer) clearTimeout(noticeTimer)
+      noticeTimer = setTimeout(() => { officeNotice.value = '' }, 9000)
+    }
   } catch (error) {
-    if (selectedId.value === taskId) errorMessage.value = getErrorMessage(error)
+    if (selectedId.value === taskId) {
+      selectedTask.value = null
+      activities.value = []
+      taskArtifacts.value = []
+      errorMessage.value = getErrorMessage(error)
+    }
   }
 }
 
@@ -111,7 +148,10 @@ async function refreshDashboard() {
       errorMessage.value = 'MySQL belum tersambung. Periksa DATABASE_URL dan jalankan migrasi Alembic.'
       return
     }
-    const [agentsResult, tasksResult] = await Promise.all([api.getAgents(), api.getTasks()])
+    const [agentsResult, tasksResult] = await Promise.all([
+      api.getAgents(),
+      api.getTasks(showArchivedTasks.value),
+    ])
     agents.value = agentsResult
     tasks.value = tasksResult
     if (selectedId.value !== null) await loadTask(selectedId.value)
@@ -122,6 +162,47 @@ async function refreshDashboard() {
   } finally {
     loading.value = false
   }
+}
+
+async function retryTask(taskId: number) {
+  errorMessage.value = ''
+  try {
+    const created = await api.retryTask(taskId)
+    selectedId.value = created.id
+    activeEditorId.value = created.id
+    selectedAgentName.value = null
+    if (!openTaskIds.value.includes(created.id)) openTaskIds.value.push(created.id)
+    await refreshDashboard()
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error)
+  }
+}
+
+async function cancelActiveTask() {
+  if (!selectedTask.value) return
+  errorMessage.value = ''
+  try {
+    await api.cancelTask(selectedTask.value.id)
+    await refreshDashboard()
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error)
+  }
+}
+
+async function archiveActiveTask(archived: boolean) {
+  if (!selectedTask.value) return
+  errorMessage.value = ''
+  try {
+    await api.setTaskArchived(selectedTask.value.id, archived)
+    await refreshDashboard()
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error)
+  }
+}
+
+async function toggleArchivedTasks() {
+  showArchivedTasks.value = !showArchivedTasks.value
+  await refreshDashboard()
 }
 
 async function selectTask(taskId: number) {
@@ -218,6 +299,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleShortcut)
   if (pollTimer) clearInterval(pollTimer)
+  if (noticeTimer) clearTimeout(noticeTimer)
 })
 </script>
 
@@ -237,6 +319,10 @@ onBeforeUnmount(() => {
     <div v-if="errorMessage" class="ide-error" role="alert">
       <span class="error-icon">!</span><span>{{ errorMessage }}</span>
       <button type="button" aria-label="Tutup pesan" @click="errorMessage = ''">×</button>
+    </div>
+    <div v-if="officeNotice" class="office-notice" role="status" aria-live="polite">
+      <span>{{ officeNotice }}</span>
+      <button type="button" aria-label="Tutup notifikasi hasil" @click="officeNotice = ''">Tutup</button>
     </div>
 
     <div class="ide-layout" :class="{ 'sidebar-collapsed': !sidebarOpen }">
@@ -290,7 +376,8 @@ onBeforeUnmount(() => {
           <div class="sidebar-quick-status">
             <span class="sidebar-section-label">STATUS LAYANAN</span>
             <div><i :class="{ 'is-offline': !isReady }" /><span>{{ isReady ? 'Backend tersambung' : 'Backend offline' }}</span></div>
-            <div><i :class="{ 'is-offline': !health?.gemini_configured }" /><span>Gemini {{ health?.gemini_configured ? 'siap' : 'belum diatur' }}</span></div>
+            <div><i :class="{ 'is-offline': !health?.ai_configured }" /><span>{{ health?.ai_provider ?? 'AI' }} {{ health?.ai_configured ? 'siap' : 'belum diatur' }}</span></div>
+            <div><i /><span>Dokumen RAG {{ health?.rag_mode === 'keyword_local' ? 'aktif · kata kunci lokal' : 'aktif · Gemini embeddings' }}</span></div>
             <p>Pergerakan agent mengikuti aktivitas tugas.</p>
           </div>
         </template>
@@ -309,7 +396,9 @@ onBeforeUnmount(() => {
             :tasks="filteredTasks"
             :selected-id="selectedId"
             :loading="loading"
+            :show-archived="showArchivedTasks"
             @select="selectTask"
+            @toggle-archived="toggleArchivedTasks"
           />
         </template>
 
@@ -368,11 +457,22 @@ onBeforeUnmount(() => {
           <template v-else>
             <div class="task-editor-title">
               <div><p class="editor-breadcrumb">TASKS <span>/</span> TASK #{{ activeTask?.id ?? activeEditorId }}</p><h1>{{ activeTask?.instruction ?? 'Loading task...' }}</h1></div>
-              <span v-if="activeTask" class="task-editor-status" :class="`task-status-${activeTask.status}`"><i />{{ activeTask.status.replaceAll('_', ' ') }}</span>
+              <div v-if="activeTask" class="task-editor-actions">
+                <span class="task-editor-status" :class="`task-status-${activeTask.status}`"><i />{{ activeTask.status.replaceAll('_', ' ') }}</span>
+                <button v-if="activeTaskCanCancel" class="task-action-button" type="button" @click="cancelActiveTask">Batalkan</button>
+                <button v-if="activeTask.status === 'failed'" class="task-action-button" type="button" @click="retryTask(activeTask.id)">Coba lagi</button>
+                <button
+                  v-if="['completed', 'failed', 'cancelled'].includes(activeTask.status)"
+                  class="task-action-button"
+                  type="button"
+                  @click="archiveActiveTask(!activeTask.archived)"
+                >{{ activeTask.archived ? 'Keluarkan dari arsip' : 'Arsipkan' }}</button>
+              </div>
             </div>
             <TasksTaskDetails
               :task="activeTask"
               :activities="activeTask ? activities : []"
+              :artifacts="activeTask ? taskArtifacts : []"
               :loading="false"
               :active-tab="editorTab"
               :selected-agent-name="selectedAgentName"
@@ -397,7 +497,7 @@ onBeforeUnmount(() => {
           <div v-if="bottomOpen" class="bottom-panel-content">
             <template v-if="bottomTab === 'problems'">
               <div v-if="!problemCount" class="diagnostic-empty">Tidak ada masalah terdeteksi</div>
-              <button v-if="health && !health.gemini_configured" class="diagnostic-row diagnostic-warning" type="button" @click="activityView = 'office'"><span>!</span><span>Gemini belum dikonfigurasi</span><small>Isi GEMINI_API_KEY dan GEMINI_MODEL di backend/.env</small></button>
+              <button v-if="health && !health.ai_configured" class="diagnostic-row diagnostic-warning" type="button" @click="activityView = 'office'"><span>!</span><span>{{ health.ai_provider }} belum dikonfigurasi</span><small>Periksa API key dan model provider di backend/.env</small></button>
               <button v-for="task in tasks.filter((item) => item.status === 'failed')" :key="task.id" class="diagnostic-row diagnostic-error" type="button" @click="selectTask(task.id)"><span>×</span><span>Tugas #{{ task.id }} gagal</span><small>{{ task.error_message ?? task.instruction }}</small></button>
               <div v-if="errorMessage" class="diagnostic-row diagnostic-error"><span>×</span><span>Koneksi workspace</span><small>{{ errorMessage }}</small></div>
             </template>
@@ -416,7 +516,7 @@ onBeforeUnmount(() => {
 
     <footer class="ide-statusbar">
       <div class="statusbar-left"><span class="statusbar-connection"><i />{{ connectionLabel }}</span><span>NF OFFICE</span><span>UTF-8</span></div>
-      <div class="statusbar-right"><span>{{ health?.gemini_configured ? 'Gemini · siap' : 'Gemini · belum diatur' }}</span><span>{{ activeTaskLabel }}</span><button type="button" @click="bottomOpen = !bottomOpen">MASALAH {{ problemCount }}</button></div>
+      <div class="statusbar-right"><span>{{ health?.ai_provider ?? 'AI' }} · {{ health?.ai_configured ? 'siap' : 'belum diatur' }}</span><span>{{ activeTaskLabel }}</span><button type="button" @click="bottomOpen = !bottomOpen">MASALAH {{ problemCount }}</button></div>
     </footer>
   </main>
 </template>
