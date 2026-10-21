@@ -28,6 +28,8 @@ const saveError = ref('')
 const saveNotice = ref('')
 const comparing = ref(false)
 const saving = ref(false)
+const pngDownloadError = ref('')
+const pngDownloading = ref(false)
 
 const statusLabels: Record<string, string> = {
   pending: 'Dalam antrean',
@@ -58,6 +60,17 @@ const fileArtifacts = computed(() =>
       agent_name: props.task?.steps.find((step) => step.id === artifact.step_id)?.agent_name ?? '',
     })),
 )
+const uiPreview = computed(() => {
+    const artifact = fileArtifacts.value.find((file) => file.name.toLowerCase().endsWith('.svg'))
+    if (!artifact) return null
+    const content = sanitizeSvgContent(artifact.content)
+    return content
+      ? {
+          artifact,
+          src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`,
+        }
+      : null
+})
 const sourceCitations = computed(() => {
   const summary = props.task?.summary ?? ''
   const match = summary.match(/Sumber dokumen:\s*([\s\S]*)$/i)
@@ -83,6 +96,57 @@ function agentName(name: string) {
   return name.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
+const safeSvgElements = new Set([
+  'svg', 'g', 'defs', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
+  'path', 'text', 'tspan', 'linearGradient', 'radialGradient', 'stop', 'clipPath',
+])
+const safeSvgAttributes = new Set([
+  'xmlns', 'viewBox', 'width', 'height', 'fill', 'stroke', 'stroke-width',
+  'stroke-linecap', 'stroke-linejoin', 'fill-opacity', 'stroke-opacity', 'opacity',
+  'x', 'y', 'x1', 'y1', 'x2', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'd', 'points',
+  'transform', 'font-family', 'font-size', 'font-weight', 'text-anchor',
+  'letter-spacing', 'dominant-baseline', 'gradientUnits', 'offset', 'stop-color',
+  'stop-opacity', 'id', 'clip-path',
+])
+
+function sanitizeSvgContent(content: string): string | null {
+  if (typeof DOMParser === 'undefined') return null
+  const parsed = new DOMParser().parseFromString(content, 'image/svg+xml')
+  const root = parsed.documentElement
+  if (root.localName !== 'svg' || parsed.querySelector('parsererror')) return null
+
+  function sanitize(element: Element) {
+    for (const attribute of [...element.attributes]) {
+      const value = attribute.value
+      if (
+        !safeSvgAttributes.has(attribute.name)
+        || /url\s*\(\s*(?!#[-\w]+)/i.test(value)
+        || /(?:javascript|data):/i.test(value)
+      ) {
+        element.removeAttribute(attribute.name)
+      }
+    }
+    for (const child of [...element.childNodes]) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const childElement = child as Element
+        if (!safeSvgElements.has(childElement.localName)) {
+          child.remove()
+        } else {
+          sanitize(childElement)
+        }
+      } else if (
+        child.nodeType !== Node.TEXT_NODE
+        || !['text', 'tspan'].includes(element.localName)
+      ) {
+        child.remove()
+      }
+    }
+  }
+
+  sanitize(root)
+  return new XMLSerializer().serializeToString(root)
+}
+
 function errorText(error: unknown) {
   if (typeof error === 'object' && error !== null && 'data' in error) {
     const data = error.data
@@ -94,13 +158,70 @@ function errorText(error: unknown) {
 }
 
 function downloadArtifact(artifact: TaskArtifact) {
-  const blob = new Blob([artifact.content], { type: 'text/plain;charset=utf-8' })
+  const extension = artifact.name.split('.').at(-1)?.toLowerCase()
+  const mimeTypes: Record<string, string> = {
+    css: 'text/css;charset=utf-8',
+    html: 'text/html;charset=utf-8',
+    svg: 'image/svg+xml;charset=utf-8',
+  }
+  const blob = new Blob([artifact.content], {
+    type: mimeTypes[extension ?? ''] ?? 'text/plain;charset=utf-8',
+  })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
   link.download = artifact.name.split('/').at(-1) ?? artifact.name
   link.click()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+async function downloadPng(artifact: TaskArtifact) {
+  const svg = sanitizeSvgContent(artifact.content)
+  if (!svg) {
+    pngDownloadError.value = 'File gambar UI/UX tidak valid atau memakai elemen yang tidak didukung.'
+    return
+  }
+  pngDownloading.value = true
+  pngDownloadError.value = ''
+  let sourceUrl = ''
+  try {
+    const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml')
+    const viewBox = parsed.documentElement.getAttribute('viewBox')?.trim().split(/[,\s]+/).map(Number)
+    const image = new Image()
+    sourceUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('SVG tidak dapat dirender.'))
+      image.src = sourceUrl
+    })
+
+    const viewWidth = viewBox?.[2]
+    const viewHeight = viewBox?.[3]
+    const width = typeof viewWidth === 'number' && Number.isFinite(viewWidth) ? viewWidth : image.naturalWidth
+    const height = typeof viewHeight === 'number' && Number.isFinite(viewHeight) ? viewHeight : image.naturalHeight
+    if (width <= 0 || height <= 0) throw new Error('Ukuran SVG tidak valid.')
+    const scale = Math.min(1, 2400 / Math.max(width, height), Math.sqrt(4_000_000 / (width * height)))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(width * scale))
+    canvas.height = Math.max(1, Math.round(height * scale))
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Canvas PNG tidak tersedia.')
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+    const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!png) throw new Error('Gambar PNG tidak dapat dibuat.')
+
+    const pngUrl = URL.createObjectURL(png)
+    const link = document.createElement('a')
+    link.href = pngUrl
+    link.download = artifact.name.replace(/\.svg$/i, '.png').split('/').at(-1) ?? 'ui-preview.png'
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(pngUrl), 0)
+  } catch {
+    pngDownloadError.value = 'Gambar UI/UX gagal diekspor menjadi PNG. Unduh file SVG untuk melihat desain.'
+  } finally {
+    if (sourceUrl) URL.revokeObjectURL(sourceUrl)
+    pngDownloading.value = false
+  }
 }
 
 function downloadProject() {
@@ -239,6 +360,16 @@ async function saveFile() {
           <div><div class="document-section-label">HASIL AGENT</div><p>{{ fileArtifacts.length }} file siap diunduh</p></div>
           <button v-if="fileArtifacts.length" type="button" @click="downloadProject">Unduh semua sebagai ZIP</button>
         </div>
+        <section v-if="uiPreview" class="ui-design-preview">
+          <header>
+            <div><div class="document-section-label">PRATINJAU UI/UX</div><strong>{{ uiPreview.artifact.name }}</strong></div>
+            <button type="button" :disabled="pngDownloading" @click="downloadPng(uiPreview.artifact)">
+              {{ pngDownloading ? 'Membuat PNG...' : 'Unduh gambar PNG' }}
+            </button>
+          </header>
+          <img :src="uiPreview.src" alt="Pratinjau gambar desain UI/UX aplikasi">
+          <p v-if="pngDownloadError" class="save-dialog-message" role="status">{{ pngDownloadError }}</p>
+        </section>
         <section v-if="fileArtifacts.length" class="generated-files">
           <div class="document-section-label">FILE HASIL AGENT</div>
           <article v-for="file in fileArtifacts" :key="file.id" class="generated-file">

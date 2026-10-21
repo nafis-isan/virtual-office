@@ -47,6 +47,53 @@ def test_create_plan_passes_retrieved_context_to_project_manager(monkeypatch):
     assert "[S1] Sumber: panduan.md" in captured["prompt"]
 
 
+def test_application_plan_always_includes_designer_and_programmer(monkeypatch):
+    monkeypatch.setattr(
+        manager,
+        "generate_text",
+        lambda *_args, **_kwargs: (
+            '{"summary":"Buat aplikasi cuaca","steps":['
+            '{"agent":"researcher","title":"Riset cuaca","expected_output":"API"}]}'
+        ),
+    )
+
+    plan = manager.create_plan("Buatkan aplikasi cuaca")
+
+    assert [step["agent"] for step in plan["steps"]] == [
+        "researcher",
+        "designer",
+        "programmer",
+    ]
+    assert plan["steps"][1]["expected_output"].endswith("ui/preview.svg untuk desain aplikasi satu halaman.")
+
+
+def test_application_plan_places_designer_before_programmer(monkeypatch):
+    monkeypatch.setattr(
+        manager,
+        "generate_text",
+        lambda *_args, **_kwargs: (
+            '{"summary":"Buat CRUD karyawan","steps":['
+            '{"agent":"programmer","title":"CRUD","expected_output":"Kode"}]}'
+        ),
+    )
+
+    plan = manager.create_plan("Implementasikan aplikasi CRUD karyawan")
+
+    assert [step["agent"] for step in plan["steps"]] == ["designer", "programmer"]
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "Buat proyek menggunakan Laravel untuk CRUD karyawan",
+        "Buatkan project Nuxt.js untuk dashboard inventaris",
+        "Create a Python project for weather reports",
+    ],
+)
+def test_framework_project_requests_are_recognized_for_file_delivery(instruction):
+    assert manager.is_application_build_request(instruction)
+
+
 @pytest.mark.parametrize(
     "response",
     [

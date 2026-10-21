@@ -10,7 +10,12 @@ from app.api.routes import download_task_artifacts
 from app.db.base import Base
 from app.models import Artifact, Task, TaskStep
 from app.services import artifact_bundle, artifacts
-from app.services.orchestrator import _extract_generated_files
+from app.services import orchestrator
+from app.services.orchestrator import (
+    _extract_generated_files,
+    _retry_missing_designer_artifacts,
+    _validate_application_artifacts,
+)
 
 
 def test_extract_generated_files_reads_paths_and_preserves_file_content():
@@ -22,6 +27,81 @@ def test_extract_generated_files_reads_paths_and_preserves_file_content():
     assert _extract_generated_files(output) == [
         ("src/app.ts", "export const app = true\n")
     ]
+
+
+def test_application_designer_requires_html_css_and_svg_artifacts():
+    files = [
+        ("ui/index.html", "<main>Employees</main>"),
+        ("ui/styles.css", "main { color: #222; }"),
+    ]
+
+    with pytest.raises(ValueError, match="file UI/UX wajib"):
+        _validate_application_artifacts("Buatkan aplikasi karyawan", "designer", files)
+
+    _validate_application_artifacts(
+        "Buatkan aplikasi karyawan",
+        "designer",
+        [*files, ("ui/preview.svg", "<svg viewBox='0 0 1 1' />")],
+    )
+
+
+def test_application_designer_retries_missing_files_and_keeps_existing_files(monkeypatch):
+    captured = {}
+
+    def fake_generate(prompt, **_kwargs):
+        captured["prompt"] = prompt
+        return (
+            "```css path=ui/styles.css\nmain { color: #222; }\n```\n"
+            "```svg path=ui/preview.svg\n<svg viewBox='0 0 1 1' />\n```"
+        )
+
+    monkeypatch.setattr(orchestrator, "generate_text", fake_generate)
+    original_output = "```html path=ui/index.html\n<main>Employees</main>\n```"
+    original_files = _extract_generated_files(original_output)
+
+    output, files = _retry_missing_designer_artifacts(
+        "Buatkan aplikasi CRUD karyawan",
+        "Buat tiga file desain.",
+        original_output,
+        original_files,
+        model_override="designer-model",
+    )
+
+    assert {path for path, _ in files} == {
+        "ui/index.html",
+        "ui/styles.css",
+        "ui/preview.svg",
+    }
+    assert original_output in output
+    assert "ui/styles.css" in captured["prompt"]
+
+
+def test_application_designer_retry_still_requires_all_files(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_text",
+        lambda *_args, **_kwargs: "```css path=ui/styles.css\nmain {}\n```",
+    )
+    original_output = "```html path=ui/index.html\n<main>Employees</main>\n```"
+
+    with pytest.raises(ValueError, match=r"\.svg"):
+        _retry_missing_designer_artifacts(
+            "Buatkan aplikasi CRUD karyawan",
+            "Buat tiga file desain.",
+            original_output,
+            _extract_generated_files(original_output),
+        )
+
+
+def test_application_programmer_requires_generated_project_files():
+    with pytest.raises(ValueError, match="belum menghasilkan file kode proyek"):
+        _validate_application_artifacts("Buatkan aplikasi karyawan", "programmer", [])
+
+    _validate_application_artifacts(
+        "Buatkan aplikasi karyawan",
+        "programmer",
+        [("app/Employee.php", "<?php")],
+    )
 
 
 def test_extract_generated_markdown_file_with_nested_code_fence():

@@ -1,8 +1,20 @@
 import json
+import re
 
 from app.services.gemini import generate_text
 
 SPECIALISTS = {"researcher", "designer", "programmer"}
+APPLICATION_BUILD_PATTERN = re.compile(
+    r"\b(?:buat|buatkan|membuat|bangun|bangunkan|bikin|implementasikan|implementasi|"
+    r"kembangkan|create|build|develop)\b[\s\S]{0,160}"
+    r"\b(?:aplikasi|app|website|web|crud|dashboard|software|proyek|project|"
+    r"laravel|nuxt(?:\s*\.?\s*js)?|python|django|flask|fastapi|react|vue|next(?:\s*\.?\s*js)?)\b",
+    re.IGNORECASE,
+)
+
+
+def is_application_build_request(instruction: str) -> bool:
+    return bool(APPLICATION_BUILD_PATTERN.search(instruction))
 
 
 def create_plan(instruction: str, *, context: str = "") -> dict:
@@ -13,6 +25,9 @@ def create_plan(instruction: str, *, context: str = "") -> dict:
         "Anda adalah Project Manager untuk kantor AI lokal. Buat rencana kerja singkat "
         "berdasarkan instruksi pengguna. Pilih hanya specialist yang relevan; urutkan "
         "dependensi secara logis. Jangan meminta akses filesystem atau menjalankan kode. "
+        "Untuk permintaan membuat aplikasi, website, atau software, selalu sertakan "
+        "langkah designer untuk membuat UI dan langkah programmer untuk membuat file proyek "
+        "yang benar-benar dapat diunduh. "
         "Balas HANYA JSON valid dengan bentuk: "
         '{"summary":"...","steps":[{"agent":"researcher|designer|programmer",'
         '"title":"...","expected_output":"..."}]}. '
@@ -56,4 +71,36 @@ def create_plan(instruction: str, *, context: str = "") -> dict:
                 "expected_output": expected_output.strip(),
             }
         )
+    if is_application_build_request(instruction):
+        unique_steps = []
+        included_agents = set()
+        for step in validated_steps:
+            if step["agent"] not in included_agents:
+                unique_steps.append(step)
+                included_agents.add(step["agent"])
+        validated_steps = unique_steps
+        if not any(step["agent"] == "designer" for step in validated_steps):
+            programmer_index = next(
+                (index for index, step in enumerate(validated_steps) if step["agent"] == "programmer"),
+                len(validated_steps),
+            )
+            validated_steps.insert(
+                programmer_index,
+                {
+                    "agent": "designer",
+                    "title": "Rancang UI/UX dan buat file visual",
+                    "expected_output": (
+                        "File ui/index.html, ui/styles.css, dan ui/preview.svg "
+                        "untuk desain aplikasi satu halaman."
+                    ),
+                },
+            )
+        if not any(step["agent"] == "programmer" for step in validated_steps):
+            validated_steps.append(
+                {
+                    "agent": "programmer",
+                    "title": "Implementasikan aplikasi dan siapkan file proyek",
+                    "expected_output": "File kode aplikasi yang dapat disimpan atau diunduh sebagai ZIP.",
+                }
+            )
     return {"summary": summary.strip()[:1000], "steps": validated_steps}

@@ -28,8 +28,34 @@ def test_generate_text_uses_openrouter_and_json_response(monkeypatch):
     assert gemini.generate_text("prompt", json_response=True) == '{"ok":true}'
     assert captured["url"] == "https://openrouter.ai/api/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["json"]["model"] == "minimax/minimax-m3.1-flash:free"
     assert captured["json"]["max_tokens"] == 8192
     assert captured["json"]["response_format"] == {"type": "json_object"}
+    assert captured["json"]["reasoning"] == {"enabled": True}
+
+
+def test_generate_text_uses_agent_model_override(monkeypatch):
+    monkeypatch.setattr(gemini.settings, "ai_provider", "openrouter")
+    monkeypatch.setattr(gemini.settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(gemini.settings, "openrouter_model", "default-model")
+    captured = {}
+
+    def fake_post(_url, **kwargs):
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "Desain UI/UX."}}]},
+        )
+
+    monkeypatch.setattr(gemini.httpx, "post", fake_post)
+
+    result = gemini.generate_text(
+        "prompt",
+        model_override="google/gemma-4-26b-a4b-it",
+    )
+
+    assert result == "Desain UI/UX."
+    assert captured["json"]["model"] == "google/gemma-4-26b-a4b-it"
     assert captured["json"]["reasoning"] == {"enabled": True}
 
 
@@ -107,6 +133,42 @@ def test_generate_text_continues_legacy_reasoning_field(monkeypatch):
     assert requests[1]["messages"][1]["reasoning"] == "opaque reasoning"
 
 
+def test_generate_text_retries_empty_response_without_reasoning(monkeypatch):
+    monkeypatch.setattr(gemini.settings, "ai_provider", "openrouter")
+    monkeypatch.setattr(gemini.settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(gemini.settings, "openrouter_model", "model-id")
+    requests = []
+
+    def fake_post(_url, **kwargs):
+        requests.append(deepcopy(kwargs["json"]))
+        content = None if len(requests) == 1 else '{"ok":true}'
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    monkeypatch.setattr(gemini.httpx, "post", fake_post)
+
+    assert gemini.generate_text("prompt", json_response=True) == '{"ok":true}'
+    assert len(requests) == 2
+    assert requests[1]["reasoning"] == {"enabled": False}
+    assert requests[1]["response_format"] == {"type": "json_object"}
+
+
+def test_generate_text_reports_when_retry_is_still_empty(monkeypatch):
+    monkeypatch.setattr(gemini.settings, "ai_provider", "openrouter")
+    monkeypatch.setattr(gemini.settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(gemini.settings, "openrouter_model", "model-id")
+    monkeypatch.setattr(
+        gemini.httpx,
+        "post",
+        lambda *_args, **_kwargs: httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": None}, "finish_reason": "length"}]},
+        ),
+    )
+
+    with pytest.raises(gemini.GeminiRequestError, match="dicoba ulang tanpa reasoning"):
+        gemini.generate_text("prompt")
+
+
 def test_generate_text_reads_text_blocks_from_openrouter_content(monkeypatch):
     monkeypatch.setattr(gemini.settings, "ai_provider", "openrouter")
     monkeypatch.setattr(gemini.settings, "openrouter_api_key", "test-key")
@@ -155,6 +217,26 @@ def test_generate_text_reports_openrouter_http_errors(monkeypatch, status, messa
     )
 
     with pytest.raises(gemini.GeminiRequestError, match=message):
+        gemini.generate_text("prompt")
+
+
+def test_generate_text_includes_openrouter_bad_request_detail(monkeypatch):
+    monkeypatch.setattr(gemini.settings, "ai_provider", "openrouter")
+    monkeypatch.setattr(gemini.settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(gemini.settings, "openrouter_model", "model-id")
+    monkeypatch.setattr(
+        gemini.httpx,
+        "post",
+        lambda *_args, **_kwargs: httpx.Response(
+            400,
+            json={"error": {"message": "reasoning parameter is not supported"}},
+        ),
+    )
+
+    with pytest.raises(
+        gemini.GeminiRequestError,
+        match="reasoning parameter is not supported",
+    ):
         gemini.generate_text("prompt")
 
 

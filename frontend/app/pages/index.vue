@@ -2,12 +2,13 @@
 import type { Activity, Agent, Task, TaskArtifact, TaskDetail } from '~/types/office'
 
 type ActivityView = 'office' | 'agents' | 'tasks' | 'knowledge'
+type OfficeRailView = 'team' | 'knowledge' | 'task'
 type EditorTab = 'overview' | 'steps' | 'output' | 'sources'
 type BottomTab = 'problems' | 'output' | 'terminal'
 
 useHead({
-  title: 'NF Office AI Workspace',
-  meta: [{ name: 'description', content: 'NF Office AI Workspace — ruang kerja tim agent AI.' }],
+  title: 'Virtual Office AI',
+  meta: [{ name: 'description', content: 'Virtual Office AI — ruang kerja tim agent AI.' }],
 })
 
 const api = useOfficeApi()
@@ -20,6 +21,7 @@ const selectedId = ref<number | null>(null)
 const openTaskIds = ref<number[]>([])
 const activeEditorId = ref<number | 'office'>('office')
 const activityView = ref<ActivityView>('office')
+const officeRailView = ref<OfficeRailView>('team')
 const editorTab = ref<EditorTab>('overview')
 const bottomTab = ref<BottomTab>('problems')
 const bottomOpen = ref(true)
@@ -165,11 +167,16 @@ async function refreshDashboard() {
 }
 
 async function retryTask(taskId: number) {
+  const stayInOffice = activeEditorId.value === 'office' && activityView.value === 'office'
   errorMessage.value = ''
   try {
     const created = await api.retryTask(taskId)
     selectedId.value = created.id
-    activeEditorId.value = created.id
+    if (stayInOffice) {
+      officeRailView.value = 'task'
+    } else {
+      activeEditorId.value = created.id
+    }
     selectedAgentName.value = null
     if (!openTaskIds.value.includes(created.id)) openTaskIds.value.push(created.id)
     await refreshDashboard()
@@ -206,8 +213,13 @@ async function toggleArchivedTasks() {
 }
 
 async function selectTask(taskId: number) {
+  const stayInOffice = activeEditorId.value === 'office' && activityView.value === 'office'
   errorMessage.value = ''
-  activeEditorId.value = taskId
+  if (stayInOffice) {
+    officeRailView.value = 'task'
+  } else {
+    activeEditorId.value = taskId
+  }
   editorTab.value = 'overview'
   selectedAgentName.value = null
   if (!openTaskIds.value.includes(taskId)) openTaskIds.value.push(taskId)
@@ -223,14 +235,19 @@ function closeTaskTab(taskId: number) {
 }
 
 async function submitInstruction(instruction: string) {
+  const stayInOffice = activeEditorId.value === 'office' && activityView.value === 'office'
   sending.value = true
   errorMessage.value = ''
   try {
     const created = await api.createTask(instruction)
     selectedId.value = created.id
     if (!openTaskIds.value.includes(created.id)) openTaskIds.value.push(created.id)
-    activeEditorId.value = created.id
-    activityView.value = 'tasks'
+    if (stayInOffice) {
+      officeRailView.value = 'task'
+    } else {
+      activeEditorId.value = created.id
+      activityView.value = 'tasks'
+    }
     composerOpen.value = false
     editorTab.value = 'overview'
     await refreshDashboard()
@@ -249,10 +266,17 @@ function startNewTask() {
 }
 
 async function selectAgent(agentName: string) {
+  const stayInOffice = activeEditorId.value === 'office' && activityView.value === 'office'
   selectedAgentName.value = agentName
-  activityView.value = 'agents'
+  if (!stayInOffice) activityView.value = 'agents'
   const firstTask = tasks.value[0]
   if (!selectedTask.value && firstTask) {
+    if (stayInOffice) {
+      await loadTask(firstTask.id)
+      selectedAgentName.value = agentName
+      editorTab.value = 'steps'
+      return
+    }
     await selectTask(firstTask.id)
     selectedAgentName.value = agentName
     editorTab.value = 'steps'
@@ -260,7 +284,7 @@ async function selectAgent(agentName: string) {
   }
   if (selectedTask.value) {
     const taskId = selectedTask.value.id
-    activeEditorId.value = taskId
+    if (!stayInOffice) activeEditorId.value = taskId
     if (!openTaskIds.value.includes(taskId)) {
       openTaskIds.value.push(taskId)
     }
@@ -306,8 +330,8 @@ onBeforeUnmount(() => {
 <template>
   <main class="ide-shell">
     <header class="ide-titlebar">
-      <NuxtLink class="brand ide-brand" to="/" aria-label="NF Office AI Workspace beranda">
-        <span class="brand-wordmark-nf"><strong>NF</strong><span>Office</span></span>
+      <NuxtLink class="brand ide-brand" to="/" aria-label="Virtual Office AI beranda">
+        <span class="brand-wordmark-nf">Virtual Office AI</span>
       </NuxtLink>
       <div class="titlebar-center"><span>Ruang kerja lokal</span></div>
       <div class="titlebar-actions">
@@ -325,8 +349,8 @@ onBeforeUnmount(() => {
       <button type="button" aria-label="Tutup notifikasi hasil" @click="officeNotice = ''">Tutup</button>
     </div>
 
-    <div class="ide-layout" :class="{ 'sidebar-collapsed': !sidebarOpen }">
-      <nav class="activity-bar" aria-label="Workspace navigation">
+    <div class="ide-layout" :class="{ 'sidebar-collapsed': !sidebarOpen, 'ide-layout-visual-office': activeEditorId === 'office' && activityView === 'office' }">
+      <nav v-if="activityView !== 'office' || activeEditorId !== 'office'" class="activity-bar" aria-label="Workspace navigation">
         <button
           v-for="item in [
             { id: 'office', label: 'Kantor' },
@@ -357,7 +381,7 @@ onBeforeUnmount(() => {
         ><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><path d="M6 3v10" /></svg></button>
       </nav>
 
-      <aside v-if="sidebarOpen" class="ide-sidebar">
+      <aside v-if="sidebarOpen && (activityView !== 'office' || activeEditorId !== 'office')" class="ide-sidebar">
         <div class="sidebar-heading">
           <strong>{{ activityView === 'office' ? 'OFFICE' : activityView.toUpperCase() }}</strong>
           <button type="button" aria-label="Sembunyikan sidebar" title="Sembunyikan sidebar (Ctrl+B)" @click="sidebarOpen = false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3-5 5 5 5" /></svg></button>
@@ -410,7 +434,7 @@ onBeforeUnmount(() => {
       </aside>
 
       <section class="ide-main" :class="{ 'ide-main-office': activeEditorId === 'office' }">
-        <div class="editor-tabs" role="tablist" aria-label="Open editors">
+        <div v-show="activeEditorId !== 'office'" class="editor-tabs" role="tablist" aria-label="Open editors">
           <div
             class="editor-tab"
             :class="{ 'editor-tab-active': activeEditorId === 'office' }"
@@ -433,25 +457,99 @@ onBeforeUnmount(() => {
 
         <div class="editor-content">
           <template v-if="activeEditorId === 'office'">
-            <div class="editor-heading">
-              <div><p class="editor-breadcrumb">RUANG KERJA <span>/</span> KANTOR</p><h1>Kantor visual</h1><p>Pantau aktivitas tim agent secara langsung.</p></div>
-              <span class="editor-live-state" :class="{ 'editor-live-offline': !isReady }"><i />{{ isReady ? 'AKTIF' : 'OFFLINE' }}</span>
-            </div>
-            <OfficeScene
-              :agents="agents"
-              :task="selectedTask"
-              :activities="activities"
-              :selected-agent-name="selectedAgentName"
-              @select-agent="selectAgent"
-            />
-            <div class="office-editor-foot">
-              <span><i class="scene-status-dot" />{{ selectedTask ? activeTaskLabel : 'Belum ada tugas dipilih' }}</span>
-              <span>{{ agents.filter((agent) => ['thinking', 'working', 'waiting', 'waiting_approval'].includes(agent.status)).length }} agent aktif</span>
-            </div>
-            <div v-if="activeAgent" class="agent-focus-strip">
-              <span class="agent-focus-mark">{{ activeAgent.display_name.slice(0, 1) }}</span>
-              <div><strong>{{ activeAgent.display_name }}</strong><small>{{ activeAgent.role }} · {{ activeAgent.status }}</small></div>
-              <button v-if="selectedTask" type="button" @click="editorTab = 'steps'; activeEditorId = selectedTask.id">Lihat aktivitas tugas</button>
+            <div class="office-workspace">
+              <section class="office-floor">
+                <div class="office-floor-heading">
+                  <div>
+                    <span class="office-floor-kicker">VIRTUAL OFFICE AI</span>
+                    <h1>Ruang kerja tim</h1>
+                    <p>Aktivitas agent mengikuti progres tugas.</p>
+                  </div>
+                  <span class="office-live-badge" :class="{ 'office-live-badge-offline': !isReady }"><i />{{ isReady ? 'LIVE' : 'OFFLINE' }}</span>
+                </div>
+                <OfficeScene
+                  :agents="agents"
+                  :task="selectedTask"
+                  :activities="activities"
+                  :selected-agent-name="selectedAgentName"
+                  @select-agent="selectAgent"
+                />
+                <div class="office-floor-footer">
+                  <span><i />{{ selectedTask ? activeTaskLabel : 'Pilih tugas untuk melihat progres' }}</span>
+                  <span>{{ agents.filter((agent) => ['thinking', 'working', 'waiting', 'waiting_approval'].includes(agent.status)).length }} / {{ agents.length }} agent aktif</span>
+                </div>
+              </section>
+              <aside
+                class="office-control-rail"
+                :class="{ 'office-control-rail-task': officeRailView === 'task' }"
+                :aria-label="officeRailView === 'team'
+                  ? 'Kontrol tim kantor'
+                  : officeRailView === 'knowledge'
+                    ? 'Pustaka dokumen kantor'
+                    : `Detail tugas ${selectedTask?.id ?? selectedId ?? ''}`"
+              >
+                <div class="office-rail-top">
+                  <div>
+                    <span class="office-rail-kicker">{{ officeRailView === 'team' ? 'TIM KAMU' : officeRailView === 'knowledge' ? 'RUANG KERJA' : `TUGAS #${selectedTask?.id ?? selectedId ?? ''}` }}</span>
+                    <strong :class="{ 'office-rail-task-title': officeRailView === 'task' }">
+                      {{ officeRailView === 'team' ? 'AI Agents' : officeRailView === 'knowledge' ? 'Dokumen' : selectedTask?.instruction ?? 'Memuat tugas...' }}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    :aria-label="officeRailView === 'team' ? 'Buka pustaka dokumen di panel kanan' : 'Kembali ke panel tim dan tugas'"
+                    @click="officeRailView = officeRailView === 'team' ? 'knowledge' : 'team'"
+                  >{{ officeRailView === 'team' ? 'Dokumen' : 'Tim & tugas' }}</button>
+                </div>
+                <template v-if="officeRailView === 'team'">
+                  <AgentsAgentStatusPanel :agents="agents" :loading="loading" :selected-agent-name="selectedAgentName" @select="selectAgent" />
+                  <TasksTaskConsole
+                    :tasks="filteredTasks"
+                    :selected-id="selectedId"
+                    :loading="loading"
+                    :show-archived="showArchivedTasks"
+                    @select="selectTask"
+                    @toggle-archived="toggleArchivedTasks"
+                  />
+                  <ChatPanel :sending="sending" :disabled="!isReady" @submit="submitInstruction" />
+                  <div class="office-rail-status">
+                    <i :class="{ 'office-status-offline': !isReady }" />
+                    <span>{{ isReady ? 'Backend tersambung' : 'Menunggu backend' }}</span>
+                    <small>{{ health?.ai_provider ?? 'AI' }}</small>
+                  </div>
+                </template>
+                <template v-else>
+                  <label v-if="officeRailView === 'knowledge'" class="office-knowledge-search">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" /><path d="m12.2 12.2 4 4" /></svg>
+                    <input v-model="searchQuery" type="search" placeholder="Cari dokumen..." aria-label="Cari dokumen">
+                  </label>
+                  <KnowledgeLibrary v-if="officeRailView === 'knowledge'" class="office-knowledge-library" :search="searchQuery" />
+                  <template v-else>
+                    <div v-if="selectedTask" class="office-task-actions">
+                      <span class="task-editor-status" :class="`task-status-${selectedTask.status}`"><i />{{ selectedTask.status.replaceAll('_', ' ') }}</span>
+                      <button v-if="activeTaskCanCancel" class="task-action-button" type="button" @click="cancelActiveTask">Batalkan</button>
+                      <button v-if="selectedTask.status === 'failed'" class="task-action-button" type="button" @click="retryTask(selectedTask.id)">Coba lagi</button>
+                      <button
+                        v-if="['completed', 'failed', 'cancelled'].includes(selectedTask.status)"
+                        class="task-action-button"
+                        type="button"
+                        @click="archiveActiveTask(!selectedTask.archived)"
+                      >{{ selectedTask.archived ? 'Keluarkan dari arsip' : 'Arsipkan' }}</button>
+                    </div>
+                    <TasksTaskDetails
+                      class="office-task-details"
+                      :task="selectedTask"
+                      :activities="activities"
+                      :artifacts="taskArtifacts"
+                      :loading="selectedTask?.id !== selectedId"
+                      :active-tab="editorTab"
+                      :selected-agent-name="selectedAgentName"
+                      @update:active-tab="editorTab = $event"
+                      @select-agent="selectAgent"
+                    />
+                  </template>
+                </template>
+              </aside>
             </div>
           </template>
           <template v-else>
@@ -482,7 +580,7 @@ onBeforeUnmount(() => {
           </template>
         </div>
 
-        <section class="bottom-panel" :class="{ 'bottom-panel-closed': !bottomOpen }" aria-label="Diagnostics panel">
+        <section v-if="activeEditorId !== 'office'" class="bottom-panel" :class="{ 'bottom-panel-closed': !bottomOpen }" aria-label="Diagnostics panel">
           <div class="bottom-panel-heading">
             <div class="bottom-tabs" role="tablist">
               <button v-for="tab in [
@@ -515,7 +613,7 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="ide-statusbar">
-      <div class="statusbar-left"><span class="statusbar-connection"><i />{{ connectionLabel }}</span><span>NF OFFICE</span><span>UTF-8</span></div>
+      <div class="statusbar-left"><span class="statusbar-connection"><i />{{ connectionLabel }}</span><span>VIRTUAL OFFICE AI</span><span>UTF-8</span></div>
       <div class="statusbar-right"><span>{{ health?.ai_provider ?? 'AI' }} · {{ health?.ai_configured ? 'siap' : 'belum diatur' }}</span><span>{{ activeTaskLabel }}</span><button type="button" @click="bottomOpen = !bottomOpen">MASALAH {{ problemCount }}</button></div>
     </footer>
   </main>

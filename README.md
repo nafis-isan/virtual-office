@@ -50,8 +50,8 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Isi `DATABASE_URL` serta konfigurasi provider di `backend/.env`. Gunakan `AI_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, dan `OPENROUTER_MODEL` untuk generasi teks melalui OpenRouter; model bawaan adalah `minimax/minimax-m3.1-flash:free` dengan reasoning aktif (`OPENROUTER_REASONING_ENABLED=true`). Atau gunakan `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` untuk Gemini. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
-Pada mode OpenRouter, dokumen RAG memakai pencocokan kata kunci lokal. Pada mode Gemini, `GEMINI_API_KEY` dan `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` dipakai untuk embedding semantik.
+Isi `DATABASE_URL` serta konfigurasi provider di `backend/.env`. Gunakan `AI_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, dan `OPENROUTER_MODEL` untuk generasi teks melalui OpenRouter; model bawaan adalah `minimax/minimax-m3.1-flash:free` dengan reasoning aktif (`OPENROUTER_REASONING_ENABLED=true`). Langkah agent Designer memakai model `OPENROUTER_DESIGNER_MODEL` (bawaan `google/gemma-4-26b-a4b-it`), sedangkan Project Manager dan specialist lain tetap memakai `OPENROUTER_MODEL`. Atur variabel tersebut jika model atau ketersediaannya berbeda di katalog akun OpenRouter. Atau gunakan `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` untuk Gemini. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
+Pada mode OpenRouter, dokumen RAG memakai pencocokan kata kunci lokal. Jika OpenRouter mengembalikan respons kosong, backend mencoba sekali lagi tanpa reasoning sebelum menandai langkah sebagai gagal. Jika Desainer belum menghasilkan semua file UI/UX wajib, backend meminta satu kali koreksi output sebelum task dinyatakan gagal. Jika OpenRouter menolak permintaan dengan HTTP 400, pesan alasan dari provider ditampilkan agar konfigurasi atau parameter yang bermasalah dapat diketahui. Pada mode Gemini, `GEMINI_API_KEY` dan `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` dipakai untuk embedding semantik.
 
 Jalankan migrasi dan server:
 
@@ -83,15 +83,15 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 
 ## Yang tersedia pada MVP ini
 
-- Scene kantor 2D pixel-art dengan empat karakter agent interaktif, workstation berlabel, ruang kolaborasi, dan rak arsip RAG.
+- Scene kantor 2D pixel-art dengan empat karakter agent interaktif yang mengikuti baris sprite referensi (Project Manager, Desainer, Programmer, Researcher), karpet di bawah workstation dan meja kolaborasi, workstation dan kursi tetap, serta rak arsip RAG. Saat idle, agent dapat berjalan di atas karpet melalui jalur yang tidak melewati meja; hanya sepasang agent yang berbincang pada satu waktu, sementara lainnya tetap berjalan. Saat tugas baru diproses, mereka berkumpul di meja tengah sebelum langkah kerja dimulai.
 - Kerangka IDE dengan activity bar Office/Agents/Tasks/Knowledge, sidebar yang dapat dicari, tab editor untuk kantor dan beberapa task, serta status bar provider/backend.
 - Dokumen task dengan tab Overview, Agent Steps, Output, dan Sources; klik agent untuk membuka aktivitas dan langkahnya.
 - Panel bawah Problems, Output, dan Terminal baca-saja. Shortcut: `Ctrl+N` task baru, `Ctrl+B` sidebar, `Ctrl+J` panel bawah, `Ctrl+K` pencarian.
-- Denah menyorot agent serta langkah dari task terpilih, menampilkan pembaruan aktivitas di samping karakter, dan menggerakkan agent aktif ke area kolaborasi berdasarkan status backend.
+- Denah menyorot agent serta langkah dari task terpilih dan menampilkan pembaruan aktivitas sesuai status backend; saat Project Manager menyusun rencana, seluruh tim berkumpul di meja tengah, lalu agent berpindah ke meja kerja masing-masing sesuai langkah aktif.
 - Panel status agent, daftar riwayat task, aktivitas, langkah, dan hasil.
 - Chat membuat task melalui REST API; dashboard melakukan polling status dari backend.
 - Project Manager menyusun rencana JSON tervalidasi, lalu specialist bekerja berurutan dan Project Manager merangkum hasil.
-- Agent dapat menghasilkan file kode atau Markdown dengan blok kode beratribut `path=...`; tab Output menyediakan pratinjau, unduh per file atau seluruh proyek sebagai ZIP (path folder dipertahankan), dan perbandingan dengan file yang ada. Simpan hanya setelah konfirmasi dan hanya ke dalam `WORKSPACE_ROOT`.
+- Agent dapat menghasilkan file kode atau Markdown dengan blok kode beratribut `path=...`; tab Output menyediakan pratinjau, unduh per file atau seluruh proyek sebagai ZIP (path folder dipertahankan), dan perbandingan dengan file yang ada. Untuk permintaan membuat aplikasi, rencana selalu menyertakan Desainer dan Programmer: Desainer menghasilkan HTML, CSS, dan SVG UI/UX yang dapat dipratinjau serta diekspor ke PNG; Programmer menghasilkan file proyek yang dapat diunduh. Simpan hanya setelah konfirmasi dan hanya ke dalam `WORKSPACE_ROOT`.
 - Task gagal dapat dicoba ulang sebagai task baru; task aktif dapat dibatalkan secara kooperatif; task selesai, gagal, atau dibatalkan dapat diarsipkan dan dipulihkan.
 - Pustaka RAG menerima dokumen PDF, TXT, MD, dan DOCX sampai 5 MB. Dengan `AI_PROVIDER=openrouter`, retrieval memakai pencocokan kata kunci lokal tanpa memanggil Gemini. Dengan `AI_PROVIDER=gemini`, embedding Gemini disimpan di MySQL dan lima potongan relevan dipakai sebagai konteks; mode embedding memerlukan `GEMINI_API_KEY`.
 - Dokumen diunggah melalui UI dan dapat dihapus dari pustaka; jalankan `alembic upgrade head` untuk membuat tabel knowledge.

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     ai_provider: str = "gemini"
     openrouter_api_key: str = ""
     openrouter_model: str = "minimax/minimax-m3.1-flash:free"
+    openrouter_designer_model: str = "google/gemma-4-26b-a4b-it"
     openrouter_reasoning_enabled: bool = True
     gemini_api_key: str = ""
     gemini_model: str = ""
