@@ -14,12 +14,15 @@ const idleWalkTick = ref(0)
 let idleWalkTimer: ReturnType<typeof setInterval> | undefined
 let deliveryTimer: ReturnType<typeof setTimeout> | undefined
 const stations = [
-  { agentName: 'project_manager', department: 'REVIEW', x: 132, y: 126, home: [227, 260], work: [227, 244], handoff: [414, 462], meeting: [500, 207], idleStops: [[200, 292], [200, 370], [350, 370], [350, 292], [350, 370], [200, 370], [200, 292], [350, 292]], color: '#bf854c', skin: '#efb879', hair: '#c28a4d', hairLight: '#e4b76d', shirt: '#161d27', shirtLight: '#f1ede0', trousers: '#111821', spriteRow: 1 },
-  { agentName: 'researcher', department: 'RESEARCH', x: 668, y: 126, home: [773, 260], work: [773, 244], handoff: [586, 462], meeting: [500, 452], idleStops: [[890, 292], [890, 96], [646, 96], [890, 96], [890, 292], [890, 292], [890, 96], [890, 96]], color: '#8b6938', skin: '#efb879', hair: '#9e302c', hairLight: '#d66a55', shirt: '#87702d', shirtLight: '#d1b94e', trousers: '#554528', spriteRow: 4 },
-  { agentName: 'designer', department: 'DESIGN', x: 132, y: 406, home: [227, 536], work: [227, 514], handoff: [460, 474], meeting: [328, 330], idleStops: [[355, 545], [355, 500], [500, 500], [500, 545], [620, 545], [500, 545], [500, 500], [355, 500]], color: '#4b85c3', skin: '#efb879', hair: '#c58c4a', hairLight: '#e0b66d', shirt: '#3584de', shirtLight: '#80b9fa', trousers: '#171a24', spriteRow: 2 },
-  { agentName: 'programmer', department: 'CODING', x: 668, y: 406, home: [773, 536], work: [773, 514], handoff: [540, 474], meeting: [672, 330], idleStops: [[890, 375], [890, 545], [890, 470], [890, 545], [890, 375], [890, 375], [890, 545], [890, 545]], color: '#487eaf', skin: '#efb879', hair: '#29232a', hairLight: '#514653', shirt: '#397fce', shirtLight: '#75b2fa', trousers: '#171a24', spriteRow: 3 },
+  { agentName: 'project_manager', department: 'REVIEW', x: 132, y: 126, home: [227, 260], work: [227, 260], handoff: [414, 462], meeting: [500, 207], returnStops: [[350, 207], [350, 292], [115, 292], [115, 110], [350, 110], [350, 292], [227, 260]], idleStops: [[200, 292], [200, 370], [350, 370], [350, 292], [350, 370], [200, 370], [200, 292], [350, 292]], color: '#bf854c', skin: '#efb879', hair: '#c28a4d', hairLight: '#e4b76d', shirt: '#161d27', shirtLight: '#f1ede0', trousers: '#111821', spriteRow: 1 },
+  { agentName: 'researcher', department: 'RESEARCH', x: 668, y: 126, home: [773, 260], work: [773, 260], handoff: [586, 462], meeting: [500, 452], returnStops: [[646, 452], [646, 292], [890, 292], [890, 110], [646, 110], [646, 292], [773, 260]], idleStops: [[890, 292], [890, 96], [646, 96], [890, 96], [890, 292], [890, 292], [890, 96], [890, 96]], color: '#8b6938', skin: '#efb879', hair: '#9e302c', hairLight: '#d66a55', shirt: '#87702d', shirtLight: '#d1b94e', trousers: '#554528', spriteRow: 4 },
+  { agentName: 'designer', department: 'DESIGN', x: 132, y: 406, home: [227, 536], work: [227, 536], handoff: [460, 474], meeting: [328, 330], returnStops: [[350, 330], [350, 570], [115, 570], [115, 370], [350, 370], [350, 570], [227, 536]], idleStops: [[355, 545], [355, 500], [500, 500], [500, 545], [620, 545], [500, 545], [500, 500], [355, 500]], color: '#4b85c3', skin: '#efb879', hair: '#c58c4a', hairLight: '#e0b66d', shirt: '#3584de', shirtLight: '#80b9fa', trousers: '#171a24', spriteRow: 2 },
+  { agentName: 'programmer', department: 'CODING', x: 668, y: 406, home: [773, 536], work: [773, 536], handoff: [540, 474], meeting: [672, 330], returnStops: [[646, 330], [646, 570], [890, 570], [890, 370], [646, 370], [646, 570], [773, 536]], idleStops: [[890, 375], [890, 545], [890, 470], [890, 545], [890, 375], [890, 375], [890, 545], [890, 545]], color: '#487eaf', skin: '#efb879', hair: '#29232a', hairLight: '#514653', shirt: '#397fce', shirtLight: '#75b2fa', trousers: '#171a24', spriteRow: 3 },
 ]
 const idleWalkStopCount = Math.max(...stations.map((station) => station.idleStops.length))
+const returnRouteStopCount = Math.max(...stations.map((station) => station.returnStops.length))
+const returnRouteStage = ref<number | null>(null)
+let returnRouteTimer: ReturnType<typeof setInterval> | undefined
 const idleChatPair = computed(() => {
   if (!officeIsIdle.value) return []
   const phase = idleWalkTick.value % 8
@@ -122,16 +125,24 @@ const characters = computed(() => {
         : agent?.status
     const idleWaypoint = station.idleStops[idleWalkTick.value % station.idleStops.length] ?? station.home
     const idleChatting = idleChatPair.value.includes(index)
+    const routeStage = returnRouteStage.value
+    const returning = routeStage !== null && taskIsActive.value
+    const returnWaypoint =
+      routeStage === null || !taskIsActive.value ? undefined : station.returnStops[routeStage]
     const position = delivering
       ? station.handoff
       : teamMeeting.value
         ? station.meeting
+        : returnWaypoint
+          ? returnWaypoint
         : atWorkstation
           ? station.work
           : officeIsIdle.value
             ? idleWaypoint
             : station.home
-    const walking = officeIsIdle.value && !idleChatting && !delivering && status !== 'failed'
+    const walking =
+      (returning && taskIsActive.value) ||
+      (officeIsIdle.value && !idleChatting && !delivering && status !== 'failed')
 
     return {
       agent,
@@ -158,6 +169,7 @@ const characters = computed(() => {
       trousers: station.trousers,
       spriteRow: station.spriteRow,
       walking,
+      returning,
       x: position[0],
       y: position[1],
     }
@@ -167,6 +179,26 @@ const characters = computed(() => {
 })
 
 const selectedCharacter = computed(() => characters.value[selectedIndex.value])
+
+watch(teamMeeting, (meeting, wasMeeting) => {
+  if (returnRouteTimer) clearInterval(returnRouteTimer)
+  returnRouteTimer = undefined
+  returnRouteStage.value = null
+
+  if (!meeting && wasMeeting && taskIsActive.value) {
+    returnRouteStage.value = 0
+    returnRouteTimer = setInterval(() => {
+      const nextStage = (returnRouteStage.value ?? 0) + 1
+      if (nextStage >= returnRouteStopCount) {
+        if (returnRouteTimer) clearInterval(returnRouteTimer)
+        returnRouteTimer = undefined
+        returnRouteStage.value = null
+        return
+      }
+      returnRouteStage.value = nextStage
+    }, 720)
+  }
+})
 
 watch(
   () => [props.task?.id ?? null, props.task?.status ?? null] as const,
@@ -196,6 +228,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (idleWalkTimer) clearInterval(idleWalkTimer)
+  if (returnRouteTimer) clearInterval(returnRouteTimer)
   if (deliveryTimer) clearTimeout(deliveryTimer)
 })
 
@@ -507,6 +540,7 @@ function selectAgent(index: number) {
             'office-agent-delivering': character.delivering,
             'office-agent-chatting': character.chatting,
             'office-agent-walking': character.walking,
+            'office-agent-returning': character.returning,
             'office-agent-meeting': character.meeting,
             'office-agent-focused': character.focused,
             [`office-agent-status-${character.status ?? 'offline'}`]: true,

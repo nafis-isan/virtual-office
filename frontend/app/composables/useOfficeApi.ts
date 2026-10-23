@@ -96,7 +96,9 @@ export function useOfficeApi() {
       status: string
       database: string
       ai_provider: string
+      ai_model: string | null
       ai_configured: boolean
+      ai_configuration_error: string | null
       gemini_configured: boolean
       gemini_embedding_configured: boolean
       rag_mode: string

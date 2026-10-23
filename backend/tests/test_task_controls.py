@@ -3,19 +3,46 @@ from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from app.api.routes import archive_task, cancel_task, list_tasks, retry_task
+from app.api.routes import archive_task, cancel_task, create_task, list_tasks, retry_task
 from app.db.base import Base
 from app.models import AgentActivity, Task, TaskStep
-from app.schemas.tasks import TaskArchiveRequest
+from app.schemas.tasks import TaskArchiveRequest, TaskCreate
+from app.services import gemini
 
 
 @pytest.fixture
-def db_session():
+def db_session(monkeypatch):
+    monkeypatch.setattr(gemini.settings, "ai_provider", "openrouter")
+    monkeypatch.setattr(gemini.settings, "openrouter_api_key", "test-key")
+    monkeypatch.setattr(
+        gemini.settings, "openrouter_model", "nvidia/nemotron-3.5-super-vl:free"
+    )
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         yield db
     engine.dispose()
+
+
+def test_task_creation_rejects_stale_minimax_configuration(db_session, monkeypatch):
+    monkeypatch.setattr(
+        gemini.settings,
+        "openrouter_model",
+        "minimax/minimax-m3.1-flash:free",
+    )
+    background_tasks = BackgroundTasks()
+
+    with pytest.raises(HTTPException) as error:
+        create_task(
+            TaskCreate(instruction="Buat proyek"),
+            background_tasks,
+            db_session,
+        )
+
+    assert error.value.status_code == 503
+    assert "environment proses" in error.value.detail
+    assert db_session.scalar(select(Task)) is None
+    assert not background_tasks.tasks
 
 
 def test_retry_creates_a_new_task_with_same_instruction(db_session):

@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.routes import router
 from app.core.config import settings
 from app.db.session import engine
+from app.services.gemini import generation_configuration_error
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,20 +31,28 @@ def health() -> dict[str, object]:
         database = "connected"
     except SQLAlchemyError:
         database = "disconnected"
+    ai_error = generation_configuration_error()
+    ai_model = (
+        settings.openrouter_model
+        if settings.ai_provider == "openrouter"
+        else settings.gemini_model
+        if settings.ai_provider == "gemini"
+        else ""
+    )
     return {
-        "status": "ok" if database == "connected" else "degraded",
+        "status": "ok" if database == "connected" and ai_error is None else "degraded",
         "database": database,
         "ai_provider": settings.ai_provider,
-        "ai_configured": (
-            bool(settings.openrouter_api_key and settings.openrouter_model)
-            if settings.ai_provider == "openrouter"
-            else bool(settings.gemini_api_key and settings.gemini_model)
-        ),
+        "ai_model": ai_model,
+        "ai_configured": ai_error is None,
+        "ai_configuration_error": ai_error,
         "gemini_configured": bool(settings.gemini_api_key and settings.gemini_model),
         "gemini_embedding_configured": bool(settings.gemini_api_key),
         "rag_mode": (
             "keyword_local"
             if settings.ai_provider == "openrouter"
             else "gemini_embeddings"
+            if settings.ai_provider == "gemini"
+            else "unavailable"
         ),
     }

@@ -35,7 +35,9 @@ const health = ref<{
   status: string
   database: string
   ai_provider: string
+  ai_model: string | null
   ai_configured: boolean
+  ai_configuration_error: string | null
   gemini_configured: boolean
   gemini_embedding_configured: boolean
   rag_mode: string
@@ -48,6 +50,19 @@ let pollTimer: ReturnType<typeof setInterval> | undefined
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 
 const isReady = computed(() => health.value?.database === 'connected')
+const canCreateTask = computed(() =>
+  isReady.value &&
+  health.value?.ai_configured === true &&
+  !!health.value.ai_model?.trim(),
+)
+const chatDisabledReason = computed(() => {
+  if (!isReady.value) return 'Backend atau database belum siap. Jalankan layanan terlebih dahulu.'
+  if (health.value?.ai_configuration_error) return health.value.ai_configuration_error
+  if (!health.value?.ai_model?.trim()) {
+    return 'Backend belum melaporkan model AI aktif. Restart backend dari folder backend agar konfigurasi terbaru dimuat.'
+  }
+  return 'Konfigurasi AI belum siap.'
+})
 const connectionLabel = computed(() => {
   if (!health.value) return 'Menghubungkan...'
   return health.value.database === 'connected' ? 'Backend terhubung' : 'Database terputus'
@@ -83,7 +98,7 @@ const activeTaskCanCancel = computed(() =>
 )
 const terminalLines = computed(() => [
   `[workspace] Backend: ${health.value?.status ?? 'menghubungkan'} · Database: ${health.value?.database ?? 'tidak diketahui'}`,
-  `[provider] ${health.value?.ai_provider ?? 'AI'}: ${health.value?.ai_configured ? 'siap' : 'belum diatur'}`,
+  `[provider] ${health.value?.ai_provider ?? 'AI'} ${health.value?.ai_model ?? ''}: ${health.value?.ai_configured ? 'siap' : health.value?.ai_configuration_error ?? 'belum diatur'}`,
   `[rag] ${health.value?.rag_mode === 'keyword_local' ? 'pencocokan kata kunci lokal' : 'Gemini embeddings'}`,
   selectedTask.value
     ? `[tugas #${selectedTask.value.id}] ${selectedTask.value.status} · ${selectedTask.value.instruction}`
@@ -415,7 +430,7 @@ onBeforeUnmount(() => {
         <template v-else-if="activityView === 'tasks'">
           <div class="sidebar-section-title"><span class="sidebar-section-label">DAFTAR TUGAS</span><button type="button" @click="startNewTask"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg> Baru</button></div>
           <label class="sidebar-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5" /><path d="m12.2 12.2 4 4" /></svg><input ref="searchInput" v-model="searchQuery" type="search" placeholder="Cari tugas..." aria-label="Cari tugas"><kbd>Ctrl K</kbd></label>
-          <ChatPanel v-if="composerOpen" :sending="sending" :disabled="!isReady" @submit="submitInstruction" />
+          <ChatPanel v-if="composerOpen" :sending="sending" :disabled="!canCreateTask" :disabled-reason="chatDisabledReason" @submit="submitInstruction" />
           <TasksTaskConsole
             :tasks="filteredTasks"
             :selected-id="selectedId"
@@ -511,7 +526,7 @@ onBeforeUnmount(() => {
                     @select="selectTask"
                     @toggle-archived="toggleArchivedTasks"
                   />
-                  <ChatPanel :sending="sending" :disabled="!isReady" @submit="submitInstruction" />
+                  <ChatPanel :sending="sending" :disabled="!canCreateTask" :disabled-reason="chatDisabledReason" @submit="submitInstruction" />
                   <div class="office-rail-status">
                     <i :class="{ 'office-status-offline': !isReady }" />
                     <span>{{ isReady ? 'Backend tersambung' : 'Menunggu backend' }}</span>

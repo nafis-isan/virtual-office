@@ -2,6 +2,7 @@ import json
 import logging
 import math
 from collections.abc import Sequence
+from urllib.parse import urlsplit
 
 from google import genai
 from google.genai import errors, types
@@ -20,27 +21,67 @@ class GeminiRequestError(RuntimeError):
     pass
 
 
+def generation_configuration_error() -> str | None:
+    try:
+        validate_generation_configuration()
+    except GeminiUnavailableError as exc:
+        return str(exc)
+    return None
+
+
+def validate_generation_configuration() -> None:
+    if settings.ai_provider == "openrouter":
+        if not settings.openrouter_api_key:
+            raise GeminiUnavailableError(
+                "OpenRouter belum dikonfigurasi. Isi OPENROUTER_API_KEY di backend/.env."
+            )
+        model = settings.openrouter_model.strip()
+        if not model:
+            raise GeminiUnavailableError(
+                "OpenRouter belum dikonfigurasi. Isi OPENROUTER_MODEL di backend/.env."
+            )
+        if model.casefold().startswith("minimax/"):
+            raise GeminiUnavailableError(
+                "Backend masih menerima OPENROUTER_MODEL MiniMax dari environment proses. "
+                "Atur environment proses ke nvidia/nemotron-3.5-super-vl:free dan restart backend; "
+                "nilai environment proses mengalahkan backend/.env."
+            )
+        parsed_url = urlsplit(settings.openrouter_base_url)
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname != "openrouter.ai"
+            or parsed_url.path.rstrip("/") != "/api/v1"
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or parsed_url.query
+            or parsed_url.fragment
+        ):
+            raise GeminiUnavailableError(
+                "OPENROUTER_BASE_URL harus menggunakan HTTPS ke "
+                "https://openrouter.ai/api/v1."
+            )
+        return
+    if settings.ai_provider == "gemini":
+        if not settings.gemini_api_key or not settings.gemini_model:
+            raise GeminiUnavailableError(
+                "Gemini belum dikonfigurasi. Isi GEMINI_API_KEY dan GEMINI_MODEL di backend/.env."
+            )
+        return
+    raise GeminiUnavailableError(
+        "AI_PROVIDER tidak dikenal. Gunakan 'openrouter' atau 'gemini' di backend/.env."
+    )
+
+
 def generate_text(
     prompt: str,
     *,
     json_response: bool = False,
-    model_override: str | None = None,
 ) -> str:
+    validate_generation_configuration()
     if settings.ai_provider == "openrouter":
         return _generate_text_openrouter(
             prompt,
             json_response=json_response,
-            model_override=model_override,
-        )
-    if model_override is not None:
-        raise GeminiUnavailableError("Pemilihan model khusus hanya tersedia untuk OpenRouter.")
-    if settings.ai_provider != "gemini":
-        raise GeminiUnavailableError(
-            "AI_PROVIDER tidak dikenal. Gunakan 'gemini' atau 'openrouter' di backend/.env."
-        )
-    if not settings.gemini_api_key or not settings.gemini_model:
-        raise GeminiUnavailableError(
-            "Gemini belum dikonfigurasi. Isi GEMINI_API_KEY dan GEMINI_MODEL di backend/.env."
         )
 
     client = genai.Client(
@@ -92,14 +133,8 @@ def _generate_text_openrouter(
     prompt: str,
     *,
     json_response: bool,
-    model_override: str | None = None,
 ) -> str:
-    model = model_override or settings.openrouter_model
-    if not settings.openrouter_api_key or not model:
-        raise GeminiUnavailableError(
-            "OpenRouter belum dikonfigurasi. Isi OPENROUTER_API_KEY dan "
-            "OPENROUTER_MODEL di backend/.env."
-        )
+    model = settings.openrouter_model
 
     headers = {
         "Authorization": f"Bearer {settings.openrouter_api_key}",
@@ -117,13 +152,13 @@ def _generate_text_openrouter(
         payload["response_format"] = {"type": "json_object"}
     initial_payload = payload.copy()
 
-    def request_completion(request_payload: dict[str, object]) -> dict:
+    def request_once(request_payload: dict[str, object]) -> httpx.Response:
         try:
-            response = httpx.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+            return httpx.post(
+                f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
                 headers=headers,
                 json=request_payload,
-                timeout=120.0,
+                timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0),
             )
         except (httpx.HTTPError, TimeoutError, OSError) as exc:
             logger.warning(
@@ -136,6 +171,37 @@ def _generate_text_openrouter(
                 "Periksa koneksi internet dan coba lagi."
             ) from exc
 
+    def request_completion(request_payload: dict[str, object]) -> dict:
+        candidates = [request_payload]
+        compatible_payload = request_payload.copy()
+        if "reasoning" in compatible_payload:
+            compatible_payload = compatible_payload.copy()
+            compatible_payload.pop("reasoning")
+            candidates.append(compatible_payload)
+        if "response_format" in compatible_payload:
+            compatible_payload = compatible_payload.copy()
+            compatible_payload.pop("response_format")
+            candidates.append(compatible_payload)
+        max_tokens = compatible_payload.get("max_tokens")
+        if isinstance(max_tokens, int) and max_tokens > 4096:
+            compatible_payload = compatible_payload.copy()
+            compatible_payload["max_tokens"] = 4096
+            candidates.append(compatible_payload)
+
+        response = None
+        for attempt, candidate in enumerate(candidates):
+            response = request_once(candidate)
+            if response.status_code != 400:
+                break
+            if attempt < len(candidates) - 1:
+                logger.info(
+                    "Retrying OpenRouter HTTP 400 with optional parameters reduced: "
+                    "model=%s retry=%s",
+                    model,
+                    attempt + 1,
+                )
+
+        assert response is not None
         if response.is_error:
             status = response.status_code
             logger.warning(
@@ -153,22 +219,10 @@ def _generate_text_openrouter(
                     "Periksa konfigurasi model OpenRouter di backend/.env."
                 )
             elif status == 400:
-                try:
-                    error_data = response.json()
-                except json.JSONDecodeError:
-                    error_data = {}
-                error = error_data.get("error") if isinstance(error_data, dict) else None
-                provider_message = error.get("message") if isinstance(error, dict) else None
-                if isinstance(provider_message, str) and provider_message.strip():
-                    detail = " ".join(provider_message.split())[:300]
-                    message = (
-                        f"OpenRouter menolak format permintaan (HTTP 400): {detail}"
-                    )
-                else:
-                    message = (
-                        "OpenRouter menolak format permintaan (HTTP 400). "
-                        "Periksa model dan parameter permintaan."
-                    )
+                message = (
+                    "OpenRouter menolak format permintaan (HTTP 400). "
+                    "Periksa dukungan parameter untuk model yang dikonfigurasi."
+                )
             elif status == 429:
                 message = "Batas permintaan OpenRouter tercapai. Periksa limit akun lalu coba lagi."
             else:

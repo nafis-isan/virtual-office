@@ -1,6 +1,6 @@
 # Visual Office AI
 
-Workspace multi-agent lokal dengan antarmuka IDE gelap: Nuxt 4 + Vue 3 untuk sidebar dan tab task, scene kantor 2D pixel-art, FastAPI untuk API/orchestrator, MySQL untuk penyimpanan dan indeks RAG, serta Gemini untuk generasi agent dan embedding RAG.
+Workspace multi-agent lokal dengan antarmuka IDE gelap: Nuxt 4 + Vue 3 untuk sidebar dan tab task, scene kantor 2D pixel-art, FastAPI untuk API/orchestrator, MySQL untuk penyimpanan dan indeks RAG, serta OpenRouter atau Gemini untuk generasi agent.
 
 ## Prasyarat
 
@@ -50,13 +50,14 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Isi `DATABASE_URL` serta konfigurasi provider di `backend/.env`. Gunakan `AI_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, dan `OPENROUTER_MODEL` untuk generasi teks melalui OpenRouter; model bawaan adalah `minimax/minimax-m3.1-flash:free` dengan reasoning aktif (`OPENROUTER_REASONING_ENABLED=true`). Langkah agent Designer memakai model `OPENROUTER_DESIGNER_MODEL` (bawaan `google/gemma-4-26b-a4b-it`), sedangkan Project Manager dan specialist lain tetap memakai `OPENROUTER_MODEL`. Atur variabel tersebut jika model atau ketersediaannya berbeda di katalog akun OpenRouter. Atau gunakan `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` untuk Gemini. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
-Pada mode OpenRouter, dokumen RAG memakai pencocokan kata kunci lokal. Jika OpenRouter mengembalikan respons kosong, backend mencoba sekali lagi tanpa reasoning sebelum menandai langkah sebagai gagal. Jika Desainer belum menghasilkan semua file UI/UX wajib, backend meminta satu kali koreksi output sebelum task dinyatakan gagal. Jika OpenRouter menolak permintaan dengan HTTP 400, pesan alasan dari provider ditampilkan agar konfigurasi atau parameter yang bermasalah dapat diketahui. Pada mode Gemini, `GEMINI_API_KEY` dan `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` dipakai untuk embedding semantik.
+Isi `DATABASE_URL` serta konfigurasi provider di `backend/.env`. Gunakan `AI_PROVIDER=openrouter`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL=nvidia/nemotron-3.5-super-vl:free`, dan `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1` untuk generasi teks melalui OpenRouter; semua agent memakai model yang sama dengan reasoning aktif (`OPENROUTER_REASONING_ENABLED=true`). Model gratis ini mendukung `response_format`, sesuai katalog OpenRouter yang diperiksa pada 23 Oktober 2026; ketersediaan dan batas penggunaan mengikuti akun OpenRouter. Backend meminta JSON terstruktur untuk rencana dan tetap memvalidasi hasilnya. Backend menolak slug MiniMax yang tersisa di environment proses dan menjelaskan bahwa environment proses mengalahkan nilai `.env`; atur environment proses ke NVIDIA Nemotron lalu restart backend. Atau gunakan `AI_PROVIDER=gemini`, `GEMINI_API_KEY`, dan `GEMINI_MODEL` untuk Gemini. API key hanya dibaca oleh backend dan tidak pernah dikirim ke browser.
+Pada mode OpenRouter, dokumen RAG memakai pencocokan kata kunci lokal. Jika OpenRouter mengembalikan respons kosong, backend mencoba sekali lagi tanpa reasoning sebelum menandai langkah sebagai gagal. Jika OpenRouter menolak permintaan dengan HTTP 400, backend menampilkan pesan aman tanpa meneruskan detail mentah provider. Pada mode Gemini, `GEMINI_API_KEY` dan `GEMINI_EMBEDDING_MODEL=gemini-embedding-001` dipakai untuk embedding semantik.
 
 Jalankan migrasi dan server:
 
 ```powershell
 alembic upgrade head
+$env:OPENROUTER_MODEL = "nvidia/nemotron-3.5-super-vl:free"
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -76,6 +77,7 @@ Buka alamat yang ditampilkan Nuxt (umumnya `http://localhost:3000`). API lokal d
 Jika port `8000` sudah digunakan backend lain, jalankan backend aplikasi ini di `8001`:
 
 ```powershell
+$env:OPENROUTER_MODEL = "nvidia/nemotron-3.5-super-vl:free"
 python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
@@ -91,7 +93,7 @@ Atur `NUXT_PUBLIC_API_BASE=http://127.0.0.1:8001` di `frontend/.env` agar Nuxt m
 - Panel status agent, daftar riwayat task, aktivitas, langkah, dan hasil.
 - Chat membuat task melalui REST API; dashboard melakukan polling status dari backend.
 - Project Manager menyusun rencana JSON tervalidasi, lalu specialist bekerja berurutan dan Project Manager merangkum hasil.
-- Agent dapat menghasilkan file kode atau Markdown dengan blok kode beratribut `path=...`; tab Output menyediakan pratinjau, unduh per file atau seluruh proyek sebagai ZIP (path folder dipertahankan), dan perbandingan dengan file yang ada. Untuk permintaan membuat aplikasi, rencana selalu menyertakan Desainer dan Programmer: Desainer menghasilkan HTML, CSS, dan SVG UI/UX yang dapat dipratinjau serta diekspor ke PNG; Programmer menghasilkan file proyek yang dapat diunduh. Simpan hanya setelah konfirmasi dan hanya ke dalam `WORKSPACE_ROOT`.
+- Agent dapat menghasilkan file kode atau Markdown dengan blok kode beratribut `path=...`; tab Output menyediakan pratinjau, unduh per file atau seluruh proyek sebagai ZIP (path folder dipertahankan), dan perbandingan dengan file yang ada. Untuk permintaan membuat aplikasi, rencana selalu menyertakan Desainer dan Programmer secara berurutan: Desainer memberi arahan implementasi UI dalam teks (warna HEX, selector/class CSS, lokasi file view/stylesheet, dan perilaku komponen), bukan mockup atau kode; Programmer menerapkan arahan itu dalam file proyek yang dapat diunduh. Simpan hanya setelah konfirmasi dan hanya ke dalam `WORKSPACE_ROOT`.
 - Task gagal dapat dicoba ulang sebagai task baru; task aktif dapat dibatalkan secara kooperatif; task selesai, gagal, atau dibatalkan dapat diarsipkan dan dipulihkan.
 - Pustaka RAG menerima dokumen PDF, TXT, MD, dan DOCX sampai 5 MB. Dengan `AI_PROVIDER=openrouter`, retrieval memakai pencocokan kata kunci lokal tanpa memanggil Gemini. Dengan `AI_PROVIDER=gemini`, embedding Gemini disimpan di MySQL dan lima potongan relevan dipakai sebagai konteks; mode embedding memerlukan `GEMINI_API_KEY`.
 - Dokumen diunggah melalui UI dan dapat dihapus dari pustaka; jalankan `alembic upgrade head` untuk membuat tabel knowledge.

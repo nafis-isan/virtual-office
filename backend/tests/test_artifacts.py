@@ -12,8 +12,10 @@ from app.models import Artifact, Task, TaskStep
 from app.services import artifact_bundle, artifacts
 from app.services import orchestrator
 from app.services.orchestrator import (
+    APPLICATION_DESIGNER_INSTRUCTIONS,
     _extract_generated_files,
-    _retry_missing_designer_artifacts,
+    _generate_application_programmer_output,
+    _previous_designer_specification,
     _validate_application_artifacts,
 )
 
@@ -29,68 +31,75 @@ def test_extract_generated_files_reads_paths_and_preserves_file_content():
     ]
 
 
-def test_application_designer_requires_html_css_and_svg_artifacts():
-    files = [
-        ("ui/index.html", "<main>Employees</main>"),
-        ("ui/styles.css", "main { color: #222; }"),
+def test_extract_generated_files_accepts_quoted_path_with_spacing():
+    output = (
+        "```php filename = \"app/Models/Employee.php\"\n"
+        "<?php\n"
+        "```\n"
+    )
+
+    assert _extract_generated_files(output) == [
+        ("app/Models/Employee.php", "<?php\n")
     ]
 
-    with pytest.raises(ValueError, match="file UI/UX wajib"):
-        _validate_application_artifacts("Buatkan aplikasi karyawan", "designer", files)
 
-    _validate_application_artifacts(
-        "Buatkan aplikasi karyawan",
-        "designer",
-        [*files, ("ui/preview.svg", "<svg viewBox='0 0 1 1' />")],
+def test_application_designer_can_provide_text_without_generated_files():
+    _validate_application_artifacts("Buatkan aplikasi karyawan", "designer", [])
+
+
+def test_application_designer_prompt_is_implementation_guidance_not_a_mockup():
+    assert "Jangan membuat mockup, wireframe" in APPLICATION_DESIGNER_INSTRUCTIONS
+    assert "warna utama dan aksen dalam HEX" in APPLICATION_DESIGNER_INSTRUCTIONS
+    assert "selector CSS atau class" in APPLICATION_DESIGNER_INSTRUCTIONS
+    assert "resources/css/app.css" in APPLICATION_DESIGNER_INSTRUCTIONS
+    assert "Tailwind" in APPLICATION_DESIGNER_INSTRUCTIONS
+
+
+def test_programmer_receives_completed_designer_specification():
+    task = Task(instruction="Buatkan aplikasi Laravel CRUD")
+    designer_step = TaskStep(
+        position=1,
+        agent_name="designer",
+        title="Ide UI/UX",
+        expected_output="Spesifikasi teks",
+        status="completed",
+        output="Gunakan tabel responsif dengan filter dan modal edit.",
     )
-
-
-def test_application_designer_retries_missing_files_and_keeps_existing_files(monkeypatch):
-    captured = {}
-
-    def fake_generate(prompt, **_kwargs):
-        captured["prompt"] = prompt
-        return (
-            "```css path=ui/styles.css\nmain { color: #222; }\n```\n"
-            "```svg path=ui/preview.svg\n<svg viewBox='0 0 1 1' />\n```"
-        )
-
-    monkeypatch.setattr(orchestrator, "generate_text", fake_generate)
-    original_output = "```html path=ui/index.html\n<main>Employees</main>\n```"
-    original_files = _extract_generated_files(original_output)
-
-    output, files = _retry_missing_designer_artifacts(
-        "Buatkan aplikasi CRUD karyawan",
-        "Buat tiga file desain.",
-        original_output,
-        original_files,
-        model_override="designer-model",
+    programmer_step = TaskStep(
+        position=2,
+        agent_name="programmer",
+        title="Buat aplikasi",
+        expected_output="File proyek",
+        status="working",
     )
+    task.steps = [designer_step, programmer_step]
 
-    assert {path for path, _ in files} == {
-        "ui/index.html",
-        "ui/styles.css",
-        "ui/preview.svg",
-    }
-    assert original_output in output
-    assert "ui/styles.css" in captured["prompt"]
+    context = _previous_designer_specification(task, programmer_step)
+
+    assert "Gunakan tabel responsif dengan filter dan modal edit." in context
+    assert "panduan implementasi" in context
 
 
-def test_application_designer_retry_still_requires_all_files(monkeypatch):
-    monkeypatch.setattr(
-        orchestrator,
-        "generate_text",
-        lambda *_args, **_kwargs: "```css path=ui/styles.css\nmain {}\n```",
+def test_programmer_does_not_receive_pending_or_unrelated_designer_specification():
+    task = Task(instruction="Buatkan aplikasi Laravel CRUD")
+    designer_step = TaskStep(
+        position=1,
+        agent_name="designer",
+        title="Ide UI/UX",
+        expected_output="Spesifikasi teks",
+        status="working",
+        output="Belum selesai",
     )
-    original_output = "```html path=ui/index.html\n<main>Employees</main>\n```"
+    programmer_step = TaskStep(
+        position=2,
+        agent_name="programmer",
+        title="Buat aplikasi",
+        expected_output="File proyek",
+        status="working",
+    )
+    task.steps = [designer_step, programmer_step]
 
-    with pytest.raises(ValueError, match=r"\.svg"):
-        _retry_missing_designer_artifacts(
-            "Buatkan aplikasi CRUD karyawan",
-            "Buat tiga file desain.",
-            original_output,
-            _extract_generated_files(original_output),
-        )
+    assert _previous_designer_specification(task, programmer_step) == ""
 
 
 def test_application_programmer_requires_generated_project_files():
@@ -102,6 +111,74 @@ def test_application_programmer_requires_generated_project_files():
         "programmer",
         [("app/Employee.php", "<?php")],
     )
+
+
+def test_application_programmer_retries_when_first_response_has_no_file_fences(
+    monkeypatch,
+):
+    responses = iter(
+        [
+            "Berikut penjelasan implementasinya.",
+            "```html path=resources/views/home.blade.php\n<h1>Halo</h1>\n```",
+        ]
+    )
+    prompts = []
+
+    def fake_generate_text(prompt):
+        prompts.append(prompt)
+        return next(responses)
+
+    monkeypatch.setattr(orchestrator, "generate_text", fake_generate_text)
+
+    output, files, rejected_paths = _generate_application_programmer_output(
+        "Buat aplikasi Laravel"
+    )
+
+    assert len(prompts) == 2
+    assert "PERBAIKAN WAJIB" in prompts[1]
+    assert output.startswith("```html path=")
+    assert files == [("resources/views/home.blade.php", "<h1>Halo</h1>\n")]
+    assert rejected_paths == []
+
+
+def test_application_programmer_retry_keeps_protected_files_rejected(monkeypatch):
+    responses = iter(
+        [
+            "Penjelasan tanpa file.",
+            "```env path=.env\nSECRET=value\n```",
+            "```env path=.env\nSECRET=value\n```",
+        ]
+    )
+    monkeypatch.setattr(
+        orchestrator, "generate_text", lambda *_args, **_kwargs: next(responses)
+    )
+
+    _output, files, rejected_paths = _generate_application_programmer_output(
+        "Buat aplikasi Laravel"
+    )
+
+    assert files == []
+    assert rejected_paths == [".env"]
+
+
+def test_application_programmer_makes_two_format_correction_attempts(monkeypatch):
+    prompts = []
+
+    def fake_generate_text(prompt):
+        prompts.append(prompt)
+        return "Penjelasan saja."
+
+    monkeypatch.setattr(orchestrator, "generate_text", fake_generate_text)
+
+    _output, files, rejected_paths = _generate_application_programmer_output(
+        "Buat aplikasi Laravel"
+    )
+
+    assert len(prompts) == 3
+    assert "PERBAIKAN WAJIB (1/2)" in prompts[1]
+    assert "PERBAIKAN WAJIB (2/2)" in prompts[2]
+    assert files == []
+    assert rejected_paths == []
 
 
 def test_extract_generated_markdown_file_with_nested_code_fence():

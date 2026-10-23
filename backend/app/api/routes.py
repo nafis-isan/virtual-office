@@ -33,6 +33,7 @@ from app.services.orchestrator import run_task
 from app.services.knowledge import index_upload, remove_document
 from app.services.artifacts import read_workspace_file, save_workspace_file
 from app.services.artifact_bundle import build_project_archive
+from app.services.gemini import GeminiUnavailableError, validate_generation_configuration
 
 router = APIRouter(prefix="/api")
 MAX_ACTIVE_TASKS = 3
@@ -47,6 +48,10 @@ ACTIVE_TASK_STATUSES = ("thinking", "working", "waiting", "waiting_approval")
 
 
 def _create_task(instruction: str, background_tasks: BackgroundTasks, db: Session) -> TaskCreated:
+    try:
+        validate_generation_configuration()
+    except GeminiUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     active_tasks = db.scalar(
         select(func.count())
         .select_from(Task)

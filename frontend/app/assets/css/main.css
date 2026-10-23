@@ -66,6 +66,7 @@ h1 span { color: #496b55; }
 .agent-route-active { opacity: .9; }
 .agent-route-idle { opacity: 0; }
 .office-agent { cursor: pointer; outline: none; transition: transform 1.6s steps(12, end); }
+.office-agent-returning { transition-duration: .72s; transition-timing-function: linear; }
 .office-agent:hover .agent-selection-ring, .office-agent:focus-visible .agent-selection-ring, .office-agent-selected .agent-selection-ring { fill: #f3efe6; fill-opacity: .25; stroke: #d2b783; stroke-width: 2.5; stroke-dasharray: 4 3; }
 .office-agent:focus-visible .agent-selection-ring { stroke: #b66b4d; stroke-width: 4; }
 .office-agent-active { filter: drop-shadow(0 3px 3px #26363866); }

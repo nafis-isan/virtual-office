@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ sending: boolean; disabled: boolean }>()
+const props = defineProps<{ sending: boolean; disabled: boolean; disabledReason?: string }>()
 const emit = defineEmits<{ submit: [instruction: string] }>()
 const instruction = ref('')
 
@@ -43,7 +43,7 @@ function submit() {
       </div>
     </form>
     <p v-if="disabled" class="form-note">
-      Backend atau database belum siap. Lengkapi konfigurasi dan jalankan layanan terlebih dahulu.
+      {{ disabledReason ?? 'Backend atau konfigurasi AI belum siap. Lengkapi konfigurasi dan jalankan layanan terlebih dahulu.' }}
     </p>
   </section>
 </template>

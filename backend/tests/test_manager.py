@@ -33,6 +33,37 @@ def test_create_plan_validates_and_trims_steps(monkeypatch):
     }
 
 
+def test_create_plan_truncates_overlong_expected_output_to_storage_limit(monkeypatch):
+    expected_output = "x" * 501
+    monkeypatch.setattr(
+        manager,
+        "generate_text",
+        lambda *_args, **_kwargs: (
+            '{"summary":"Rencana","steps":[{"agent":"programmer",'
+            f'"title":"Kode","expected_output":"{expected_output}"' + "}]}"
+        ),
+    )
+
+    plan = manager.create_plan("Implementasikan fungsi")
+
+    assert len(plan["steps"][0]["expected_output"]) == 500
+
+
+def test_create_plan_rejects_empty_or_non_string_expected_output(monkeypatch):
+    for expected_output in ('""', "null", "123"):
+        monkeypatch.setattr(
+            manager,
+            "generate_text",
+            lambda *_args, value=expected_output, **_kwargs: (
+                '{"summary":"Rencana","steps":[{"agent":"programmer",'
+                f'"title":"Kode","expected_output":{value}' + "}]}"
+            ),
+        )
+
+        with pytest.raises(ValueError, match="Deskripsi hasil langkah"):
+            manager.create_plan("Implementasikan fungsi")
+
+
 def test_create_plan_passes_retrieved_context_to_project_manager(monkeypatch):
     captured = {}
 
@@ -64,7 +95,8 @@ def test_application_plan_always_includes_designer_and_programmer(monkeypatch):
         "designer",
         "programmer",
     ]
-    assert plan["steps"][1]["expected_output"].endswith("ui/preview.svg untuk desain aplikasi satu halaman.")
+    assert plan["steps"][1]["title"] == "Berikan arahan UI dan CSS untuk Programmer"
+    assert "selector/class" in plan["steps"][1]["expected_output"]
 
 
 def test_application_plan_places_designer_before_programmer(monkeypatch):
@@ -80,6 +112,23 @@ def test_application_plan_places_designer_before_programmer(monkeypatch):
     plan = manager.create_plan("Implementasikan aplikasi CRUD karyawan")
 
     assert [step["agent"] for step in plan["steps"]] == ["designer", "programmer"]
+
+
+def test_application_plan_reorders_designer_before_programmer(monkeypatch):
+    monkeypatch.setattr(
+        manager,
+        "generate_text",
+        lambda *_args, **_kwargs: (
+            '{"summary":"CRUD","steps":['
+            '{"agent":"programmer","title":"Implementasi","expected_output":"Kode"},'
+            '{"agent":"designer","title":"UI","expected_output":"Desain"}]}'
+        ),
+    )
+
+    plan = manager.create_plan("Implementasikan aplikasi CRUD")
+
+    assert [step["agent"] for step in plan["steps"]] == ["designer", "programmer"]
+    assert plan["steps"][0]["expected_output"].startswith("Catatan implementasi")
 
 
 @pytest.mark.parametrize(
